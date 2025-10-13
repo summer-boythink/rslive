@@ -4,7 +4,7 @@ use std::{
     io::{self, Read},
 };
 
-use crate::amf0::{Amf0Value, *};
+use crate::protocol::amf0::{Amf0Value, *};
 
 pub struct Amf0Decoder {
     /// Reference cache for handling AMF0 references

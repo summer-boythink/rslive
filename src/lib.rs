@@ -94,4 +94,17 @@
 //! assert_eq!(value, decoded);
 //! ```
 
-pub mod amf0;
+pub mod protocol;
+
+// Re-export for backwards compatibility and convenience
+pub mod amf0 {
+    pub use crate::protocol::amf0::*;
+}
+
+pub mod amf3 {
+    pub use crate::protocol::amf3::*;
+}
+
+pub mod rtmp {
+    pub use crate::protocol::rtmp::*;
+}

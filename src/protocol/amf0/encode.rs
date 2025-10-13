@@ -1,7 +1,7 @@
 use byteorder::{BigEndian, WriteBytesExt};
 use std::io::{self, Write};
 
-use crate::amf0::{Amf0Value, *};
+use crate::protocol::amf0::{Amf0Value, *};
 
 pub struct Amf0Encoder {
     /// Reference cache for handling AMF0 references
