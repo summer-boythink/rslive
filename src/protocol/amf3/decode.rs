@@ -209,7 +209,7 @@ impl Amf3Decoder {
 
         let trait_info = info >> 1;
 
-        let (class_def, is_trait_reference) = if trait_info & AMF3_REFERENCE_BIT == 0 {
+        let (class_def, _is_trait_reference) = if trait_info & AMF3_REFERENCE_BIT == 0 {
             // Reference to existing trait
             let trait_reference = (trait_info >> 1) as usize;
             if trait_reference >= self.trait_table.len() {

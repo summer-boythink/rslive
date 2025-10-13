@@ -299,7 +299,7 @@ impl Amf0Decoder {
         Ok(result)
     }
 
-    fn decode_amf3_object<R: Read>(&mut self, reader: &mut R) -> Result<Amf0Value, io::Error> {
+    fn decode_amf3_object<R: Read>(&mut self, _reader: &mut R) -> Result<Amf0Value, io::Error> {
         // For AMF3 objects, we need to parse the AMF3 data properly
         // For now, we'll return an error since AMF3 parsing is complex
         // In a full implementation, this would delegate to an AMF3 decoder

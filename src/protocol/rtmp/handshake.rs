@@ -1,6 +1,6 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::{
-    io::{self, Read, Write},
+    io::{Read, Write},
     time::{SystemTime, UNIX_EPOCH},
 };
 

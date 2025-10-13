@@ -1,15 +1,14 @@
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::{
     collections::HashMap,
-    io::{self, Read, Write},
+    io::{Read, Write},
     time::{Duration, Instant},
 };
 
 use super::{
-    RtmpConfig, RtmpError, RtmpResult,
-    chunk::{RtmpChunk, RtmpChunkHandler},
+    RtmpConfig, RtmpResult,
+    chunk::RtmpChunkHandler,
     chunk_stream_id, command,
-    handshake::{RtmpHandshake, SimpleHandshake},
+    handshake::SimpleHandshake,
     message::{AmfCommand, ControlMessage, RtmpMessage},
     message_type, status,
 };
@@ -706,7 +705,6 @@ pub struct ConnectionStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
     fn test_connection_creation() {

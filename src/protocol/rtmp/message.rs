@@ -1,10 +1,7 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::{
-    collections::HashMap,
-    io::{self, Read, Write},
-};
+use std::collections::HashMap;
 
-use crate::protocol::{amf0::Amf0Value, amf3::Amf3Value};
+use crate::protocol::amf0::Amf0Value;
 
 use super::{RtmpError, RtmpResult, message_type};
 
@@ -436,7 +433,6 @@ impl ControlMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::rtmp::command;
 
     #[test]
     fn test_control_message_set_chunk_size() {

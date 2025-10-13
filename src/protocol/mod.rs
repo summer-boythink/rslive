@@ -126,7 +126,7 @@ pub mod examples {
         let mut chunk_handler = RtmpChunkHandler::new(128);
 
         // Create a large message that will be split into chunks
-        let metadata = vec![0xFF; 1000]; // 1000 bytes of metadata
+        let _metadata = vec![0xFF; 1000]; // 1000 bytes of metadata
         let metadata_msg = RtmpMessage::create_amf0_data(
             "onMetaData",
             vec![Amf0Value::String("test metadata".to_string())],

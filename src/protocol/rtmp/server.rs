@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     sync::{Arc, Mutex},
     thread,
@@ -8,7 +7,7 @@ use std::{
 };
 
 use super::{
-    RTMP_DEFAULT_PORT, RtmpConfig, RtmpError, RtmpResult,
+    RtmpConfig, RtmpError, RtmpResult,
     connection::{ConnectionState, ConnectionStats, RtmpConnection},
     message::{AmfCommand, RtmpMessage},
     message_type, status,

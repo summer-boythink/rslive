@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io::{self, Read, Write},
     net::{TcpStream, ToSocketAddrs},
     time::{Duration, Instant},
 };

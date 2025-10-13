@@ -249,7 +249,7 @@ impl RtmpChunkHandler {
                 };
 
                 let last_timestamp = state.map(|s| s.last_timestamp).unwrap_or(0);
-                let timestamp = if timestamp_delta >= 0xFFFFFF {
+                let _timestamp = if timestamp_delta >= 0xFFFFFF {
                     last_timestamp + extended_timestamp.unwrap()
                 } else {
                     last_timestamp + timestamp_delta
@@ -283,7 +283,7 @@ impl RtmpChunkHandler {
                 };
 
                 let last_timestamp = state.map(|s| s.last_timestamp).unwrap_or(0);
-                let timestamp = if timestamp_delta >= 0xFFFFFF {
+                let _timestamp = if timestamp_delta >= 0xFFFFFF {
                     last_timestamp + extended_timestamp.unwrap()
                 } else {
                     last_timestamp + timestamp_delta

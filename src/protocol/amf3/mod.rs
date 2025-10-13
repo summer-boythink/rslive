@@ -201,7 +201,6 @@ pub fn decode(data: &[u8]) -> Result<Amf3Value, std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
     fn test_amf3_value_creation() {
