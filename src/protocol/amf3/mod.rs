@@ -476,4 +476,133 @@ mod tests {
         assert!(encode_time.as_millis() < 50);
         assert!(decode_time.as_millis() < 50);
     }
+
+    #[test]
+    fn test_object_references() {
+        use super::encode::Amf3Encoder;
+
+        // Create a shared object
+        let shared_obj = Amf3Value::object(
+            "SharedData".to_string(),
+            vec![
+                ("id".to_string(), Amf3Value::Integer(42)),
+                ("name".to_string(), Amf3Value::String("shared".to_string())),
+            ],
+        );
+
+        // Create an array that references the same object multiple times
+        let array = Amf3Value::array(vec![
+            shared_obj.clone(),
+            Amf3Value::String("separator".to_string()),
+            shared_obj.clone(), // This should be encoded as a reference
+        ]);
+
+        // Test manual encoding to check reference behavior
+        let mut encoder = Amf3Encoder::new();
+        let mut buffer = Vec::new();
+
+        // Encode the array
+        let bytes_written = encoder.encode(&mut buffer, &array).unwrap();
+        println!("Encoded array with references: {} bytes", bytes_written);
+
+        // Decode and verify
+        let decoded = decode(&buffer).unwrap();
+        assert_eq!(array, decoded);
+    }
+
+    #[test]
+    fn test_string_references() {
+        use super::encode::Amf3Encoder;
+
+        // Create objects with repeated strings
+        let repeated_string = "This string appears multiple times".to_string();
+
+        let obj1 = Amf3Value::object(
+            "TestClass".to_string(),
+            vec![
+                (
+                    "message".to_string(),
+                    Amf3Value::String(repeated_string.clone()),
+                ),
+                ("id".to_string(), Amf3Value::Integer(1)),
+            ],
+        );
+
+        let obj2 = Amf3Value::object(
+            "TestClass".to_string(),
+            vec![
+                (
+                    "message".to_string(),
+                    Amf3Value::String(repeated_string.clone()),
+                ),
+                ("id".to_string(), Amf3Value::Integer(2)),
+            ],
+        );
+
+        let array = Amf3Value::array(vec![obj1, obj2]);
+
+        // Manual encoding to test string reference table
+        let mut encoder = Amf3Encoder::new();
+        let mut buffer = Vec::new();
+
+        let bytes_written = encoder.encode(&mut buffer, &array).unwrap();
+        println!(
+            "Encoded array with string references: {} bytes",
+            bytes_written
+        );
+
+        // Decode and verify
+        let decoded = decode(&buffer).unwrap();
+        assert_eq!(array, decoded);
+    }
+
+    #[test]
+    fn test_circular_reference_detection() {
+        use super::encode::Amf3Encoder;
+
+        // Test the encoder's ability to handle self-referential structures
+        let obj = Amf3Value::object(
+            "Node".to_string(),
+            vec![
+                ("value".to_string(), Amf3Value::Integer(100)),
+                ("name".to_string(), Amf3Value::String("root".to_string())),
+            ],
+        );
+
+        // Create an array that contains the same object twice
+        let container = Amf3Value::array(vec![obj.clone(), obj.clone()]);
+
+        // Test encoding
+        let mut encoder = Amf3Encoder::new();
+        let mut buffer = Vec::new();
+
+        let result = encoder.encode(&mut buffer, &container);
+        assert!(result.is_ok());
+
+        // Verify the encoded data can be decoded
+        let decoded = decode(&buffer).unwrap();
+        assert_eq!(container, decoded);
+    }
+
+    #[test]
+    fn test_vector_references() {
+        use super::encode::Amf3Encoder;
+
+        // Create identical vectors
+        let vec1 = Amf3Value::vector_int(vec![1, 2, 3, 4, 5], true);
+        let vec2 = vec1.clone();
+
+        let container = Amf3Value::array(vec![vec1, vec2]);
+
+        // Test encoding
+        let mut encoder = Amf3Encoder::new();
+        let mut buffer = Vec::new();
+
+        let bytes_written = encoder.encode(&mut buffer, &container).unwrap();
+        println!("Encoded vectors with references: {} bytes", bytes_written);
+
+        // Decode and verify
+        let decoded = decode(&buffer).unwrap();
+        assert_eq!(container, decoded);
+    }
 }

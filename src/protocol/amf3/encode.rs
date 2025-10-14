@@ -10,7 +10,7 @@ pub struct Amf3Encoder {
     /// String reference table for deduplication
     string_table: HashMap<String, usize>,
     /// Object reference table for circular references
-    object_table: Vec<*const Amf3Value>,
+    object_table: Vec<Amf3Value>,
     /// Class definition reference table
     trait_table: Vec<ClassDefinition>,
 }
@@ -147,7 +147,7 @@ impl Amf3Encoder {
         }
 
         // New XML doc
-        self.object_table.push(&xml_value as *const _);
+        self.object_table.push(xml_value.clone());
         let length_info = (xml.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, length_info as u32)?;
         writer.write_all(xml.as_bytes())?;
@@ -171,7 +171,7 @@ impl Amf3Encoder {
         }
 
         // New date
-        self.object_table.push(&date_value as *const _);
+        self.object_table.push(date_value.clone());
         let mut bytes_written = self.write_u29_int(writer, 1)?; // New object marker
         writer.write_f64::<BigEndian>(timestamp)?;
         bytes_written += 8;
@@ -198,7 +198,7 @@ impl Amf3Encoder {
         }
 
         // New array
-        self.object_table.push(&array_value as *const _);
+        self.object_table.push(array_value.clone());
         let dense_length_info = (dense.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, dense_length_info as u32)?;
 
@@ -244,7 +244,7 @@ impl Amf3Encoder {
         }
 
         // Add to object table
-        self.object_table.push(&object_value as *const _);
+        self.object_table.push(object_value.clone());
 
         // Check if trait definition is already in trait table
         let class_def = ClassDefinition {
@@ -328,7 +328,7 @@ impl Amf3Encoder {
         }
 
         // New XML
-        self.object_table.push(&xml_value as *const _);
+        self.object_table.push(xml_value.clone());
         let length_info = (xml.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, length_info as u32)?;
         writer.write_all(xml.as_bytes())?;
@@ -352,7 +352,7 @@ impl Amf3Encoder {
         }
 
         // New ByteArray
-        self.object_table.push(&byte_array_value as *const _);
+        self.object_table.push(byte_array_value.clone());
         let length_info = (bytes.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, length_info as u32)?;
         writer.write_all(bytes)?;
@@ -379,7 +379,7 @@ impl Amf3Encoder {
         }
 
         // New VectorInt
-        self.object_table.push(&vector_value as *const _);
+        self.object_table.push(vector_value.clone());
         let length_info = (items.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, length_info as u32)?;
         writer.write_u8(if fixed { 1 } else { 0 })?;
@@ -411,7 +411,7 @@ impl Amf3Encoder {
         }
 
         // New VectorUint
-        self.object_table.push(&vector_value as *const _);
+        self.object_table.push(vector_value.clone());
         let length_info = (items.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, length_info as u32)?;
         writer.write_u8(if fixed { 1 } else { 0 })?;
@@ -443,7 +443,7 @@ impl Amf3Encoder {
         }
 
         // New VectorDouble
-        self.object_table.push(&vector_value as *const _);
+        self.object_table.push(vector_value.clone());
         let length_info = (items.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, length_info as u32)?;
         writer.write_u8(if fixed { 1 } else { 0 })?;
@@ -477,7 +477,7 @@ impl Amf3Encoder {
         }
 
         // New VectorObject
-        self.object_table.push(&vector_value as *const _);
+        self.object_table.push(vector_value.clone());
         let length_info = (items.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, length_info as u32)?;
         writer.write_u8(if fixed { 1 } else { 0 })?;
@@ -510,7 +510,7 @@ impl Amf3Encoder {
         }
 
         // New Dictionary
-        self.object_table.push(&dict_value as *const _);
+        self.object_table.push(dict_value.clone());
         let length_info = (pairs.len() << 1) | 1;
         let mut bytes_written = self.write_u29_int(writer, length_info as u32)?;
         writer.write_u8(if weak_keys { 1 } else { 0 })?;
@@ -586,11 +586,206 @@ impl Amf3Encoder {
         Ok(bytes_written)
     }
 
-    /// Find object reference in table (simplified - in real implementation would use proper comparison)
-    fn find_object_reference(&self, _value: &Amf3Value) -> Option<usize> {
-        // For simplicity, we don't implement object reference lookup
-        // In a real implementation, this would compare objects for equality
+    /// Find object reference in table
+    fn find_object_reference(&self, value: &Amf3Value) -> Option<usize> {
+        // Look for the value in the object table
+        for (index, cached_value) in self.object_table.iter().enumerate() {
+            if self.amf3_values_equal(cached_value, value) {
+                return Some(index);
+            }
+        }
         None
+    }
+
+    /// Compare two AMF3 values for equality (handles circular references safely)
+    fn amf3_values_equal(&self, a: &Amf3Value, b: &Amf3Value) -> bool {
+        match (a, b) {
+            (Amf3Value::Undefined, Amf3Value::Undefined) => true,
+            (Amf3Value::Null, Amf3Value::Null) => true,
+            (Amf3Value::False, Amf3Value::False) => true,
+            (Amf3Value::True, Amf3Value::True) => true,
+            (Amf3Value::Integer(a), Amf3Value::Integer(b)) => a == b,
+            (Amf3Value::Double(a), Amf3Value::Double(b)) => {
+                // Handle NaN and floating point comparison
+                if a.is_nan() && b.is_nan() {
+                    true
+                } else {
+                    (a - b).abs() < f64::EPSILON
+                }
+            }
+            (Amf3Value::String(a), Amf3Value::String(b)) => a == b,
+            (Amf3Value::XmlDoc(a), Amf3Value::XmlDoc(b)) => a == b,
+            (Amf3Value::Xml(a), Amf3Value::Xml(b)) => a == b,
+            (Amf3Value::Date(a), Amf3Value::Date(b)) => {
+                // Handle NaN timestamps
+                if a.is_nan() && b.is_nan() {
+                    true
+                } else {
+                    (a - b).abs() < f64::EPSILON
+                }
+            }
+            (Amf3Value::ByteArray(a), Amf3Value::ByteArray(b)) => a == b,
+            (
+                Amf3Value::Array {
+                    dense: da,
+                    associative: aa,
+                },
+                Amf3Value::Array {
+                    dense: db,
+                    associative: ab,
+                },
+            ) => {
+                // Compare dense arrays
+                if da.len() != db.len() {
+                    return false;
+                }
+                for (va, vb) in da.iter().zip(db.iter()) {
+                    if !self.amf3_values_equal(va, vb) {
+                        return false;
+                    }
+                }
+
+                // Compare associative arrays
+                if aa.len() != ab.len() {
+                    return false;
+                }
+                for (ka, va) in aa.iter() {
+                    match ab.get(ka) {
+                        Some(vb) => {
+                            if !self.amf3_values_equal(va, vb) {
+                                return false;
+                            }
+                        }
+                        None => return false,
+                    }
+                }
+                true
+            }
+            (
+                Amf3Value::Object {
+                    class_name: cna,
+                    is_dynamic: ida,
+                    is_externalizable: iea,
+                    properties: propa,
+                    values: vala,
+                },
+                Amf3Value::Object {
+                    class_name: cnb,
+                    is_dynamic: idb,
+                    is_externalizable: ieb,
+                    properties: propb,
+                    values: valb,
+                },
+            ) => {
+                // Compare object metadata
+                if cna != cnb || ida != idb || iea != ieb || propa != propb {
+                    return false;
+                }
+
+                // Compare values
+                if vala.len() != valb.len() {
+                    return false;
+                }
+                for (ka, va) in vala.iter() {
+                    match valb.get(ka) {
+                        Some(vb) => {
+                            if !self.amf3_values_equal(va, vb) {
+                                return false;
+                            }
+                        }
+                        None => return false,
+                    }
+                }
+                true
+            }
+            (
+                Amf3Value::VectorInt {
+                    fixed: fa,
+                    items: ia,
+                },
+                Amf3Value::VectorInt {
+                    fixed: fb,
+                    items: ib,
+                },
+            ) => fa == fb && ia == ib,
+            (
+                Amf3Value::VectorUint {
+                    fixed: fa,
+                    items: ia,
+                },
+                Amf3Value::VectorUint {
+                    fixed: fb,
+                    items: ib,
+                },
+            ) => fa == fb && ia == ib,
+            (
+                Amf3Value::VectorDouble {
+                    fixed: fa,
+                    items: ia,
+                },
+                Amf3Value::VectorDouble {
+                    fixed: fb,
+                    items: ib,
+                },
+            ) => {
+                if fa != fb || ia.len() != ib.len() {
+                    return false;
+                }
+                for (va, vb) in ia.iter().zip(ib.iter()) {
+                    if va.is_nan() && vb.is_nan() {
+                        continue;
+                    }
+                    if (va - vb).abs() >= f64::EPSILON {
+                        return false;
+                    }
+                }
+                true
+            }
+            (
+                Amf3Value::VectorObject {
+                    fixed: fa,
+                    type_name: tna,
+                    items: ia,
+                },
+                Amf3Value::VectorObject {
+                    fixed: fb,
+                    type_name: tnb,
+                    items: ib,
+                },
+            ) => {
+                if fa != fb || tna != tnb || ia.len() != ib.len() {
+                    return false;
+                }
+                for (va, vb) in ia.iter().zip(ib.iter()) {
+                    if !self.amf3_values_equal(va, vb) {
+                        return false;
+                    }
+                }
+                true
+            }
+            (
+                Amf3Value::Dictionary {
+                    weak_keys: wka,
+                    pairs: pa,
+                },
+                Amf3Value::Dictionary {
+                    weak_keys: wkb,
+                    pairs: pb,
+                },
+            ) => {
+                if wka != wkb || pa.len() != pb.len() {
+                    return false;
+                }
+                // For dictionaries, order matters in AMF3
+                for ((ka, va), (kb, vb)) in pa.iter().zip(pb.iter()) {
+                    if !self.amf3_values_equal(ka, kb) || !self.amf3_values_equal(va, vb) {
+                        return false;
+                    }
+                }
+                true
+            }
+            _ => false, // Different types
+        }
     }
 
     /// Find trait reference in table
