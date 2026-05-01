@@ -1,5 +1,8 @@
 pub mod amf0;
 pub mod amf3;
+pub mod common;
+pub mod flv;
+pub mod hls;
 pub mod rtmp;
 
 /// Comprehensive examples demonstrating AMF3 and RTMP usage
