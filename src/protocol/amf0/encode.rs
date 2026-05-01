@@ -5,13 +5,13 @@ use crate::protocol::amf0::{Amf0Value, *};
 
 pub struct Amf0Encoder {
     /// Reference cache for handling AMF0 references
-    ref_cache: Vec<*const Amf0Value>,
+    _ref_cache: Vec<*const Amf0Value>,
 }
 
 impl Amf0Encoder {
     pub fn new() -> Self {
         Self {
-            ref_cache: Vec::new(),
+            _ref_cache: Vec::new(),
         }
     }
 

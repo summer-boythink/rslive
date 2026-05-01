@@ -41,7 +41,7 @@ impl VideoFrameType {
     /// Create from H.264 NAL unit type
     pub fn from_h264_nal(nal_type: u8) -> Option<Self> {
         match nal_type {
-            5 => Some(Self::Keyframe), // IDR slice
+            5 => Some(Self::Keyframe),   // IDR slice
             1 => Some(Self::Interframe), // Non-IDR slice
             _ => None,
         }
@@ -171,13 +171,7 @@ impl MediaFrame {
         codec: CodecType,
         data: Bytes,
     ) -> Self {
-        Self::new(
-            track_id,
-            pts,
-            FrameType::Video(video_type),
-            codec,
-            data,
-        )
+        Self::new(track_id, pts, FrameType::Video(video_type), codec, data)
     }
 
     /// Create an audio frame
@@ -188,13 +182,7 @@ impl MediaFrame {
         codec: CodecType,
         data: Bytes,
     ) -> Self {
-        Self::new(
-            track_id,
-            pts,
-            FrameType::Audio(audio_type),
-            codec,
-            data,
-        )
+        Self::new(track_id, pts, FrameType::Audio(audio_type), codec, data)
     }
 
     /// Check if this is a video frame

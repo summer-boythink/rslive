@@ -1,14 +1,14 @@
 //! HLS HTTP server for serving playlists and segments
 
 use super::{
+    HlsConfig, HlsError, HlsResult,
     m3u8::{MasterPlaylist, Variant},
     packager::HlsPackagerManager,
-    HlsConfig, HlsError, HlsResult,
 };
 use crate::media::{StreamId, StreamRouter};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 
 /// HLS server configuration
 #[derive(Debug, Clone)]
@@ -80,8 +80,8 @@ impl HlsServer {
         let state = ServerState {
             router: Arc::clone(&self.router),
             packager_manager: Arc::clone(&self.packager_manager),
-            config: self.config.clone(),
-            hls_config: self.hls_config.clone(),
+            _config: self.config.clone(),
+            _hls_config: self.hls_config.clone(),
         };
 
         axum::Router::new()
@@ -98,8 +98,8 @@ impl HlsServer {
 struct ServerState {
     router: Arc<StreamRouter>,
     packager_manager: Arc<HlsPackagerManager>,
-    config: ServerConfig,
-    hls_config: HlsConfig,
+    _config: ServerConfig,
+    _hls_config: HlsConfig,
 }
 
 /// Handle master playlist request
@@ -121,10 +121,7 @@ async fn handle_master_playlist(
     let bandwidth = 2_000_000u64; // TODO: Get actual bitrate
 
     // Add variant
-    master.add_variant(
-        Variant::new(bandwidth, "index.m3u8")
-            .with_codecs("avc1.42e00a,mp4a.40.2"),
-    );
+    master.add_variant(Variant::new(bandwidth, "index.m3u8").with_codecs("avc1.42e00a,mp4a.40.2"));
 
     let body = master.to_string();
 
@@ -144,7 +141,9 @@ async fn handle_media_playlist(
     let stream_id = StreamId::new(stream_name.clone());
 
     // Get or create packager for stream
-    let packager = state.packager_manager.get_packager(&stream_id)
+    let packager = state
+        .packager_manager
+        .get_packager(&stream_id)
         .unwrap_or_else(|| state.packager_manager.create_packager(stream_id));
 
     // Get playlist
@@ -179,14 +178,12 @@ async fn handle_segment(
 
     // Get segment
     match packager.get_segment(segment_idx).await {
-        Ok(Some(segment)) => {
-            axum::response::Response::builder()
-                .status(200)
-                .header("Content-Type", segment.info.format.mime_type())
-                .header("Cache-Control", "max-age=3600")
-                .body(axum::body::Body::from(segment.data))
-                .unwrap()
-        }
+        Ok(Some(segment)) => axum::response::Response::builder()
+            .status(200)
+            .header("Content-Type", segment.info.format.mime_type())
+            .header("Cache-Control", "max-age=3600")
+            .body(axum::body::Body::from(segment.data))
+            .unwrap(),
         Ok(None) => not_found(format!("Segment {} not found", segment_idx)),
         Err(e) => {
             error!(error = %e, "Failed to load segment");
@@ -221,8 +218,6 @@ fn server_error(message: impl Into<String>) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[tokio::test]
     #[ignore] // Requires running server
     async fn test_hls_server() {

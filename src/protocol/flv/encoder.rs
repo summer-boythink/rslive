@@ -1,10 +1,10 @@
 //! FLV encoder (muxer) for converting MediaFrames to FLV format
 
 use super::{
-    audio_frame_to_flv, video_frame_to_flv, FlvError, FlvHeader, FlvResult, FlvTagHeader,
-    TagType, FLV_TAG_HEADER_SIZE, PREVIOUS_TAG_SIZE,
+    FLV_TAG_HEADER_SIZE, FlvHeader, FlvResult, FlvTagHeader, PREVIOUS_TAG_SIZE, TagType,
+    audio_frame_to_flv, video_frame_to_flv,
 };
-use crate::media::{FrameType, MediaFrame, Timestamp};
+use crate::media::{FrameType, MediaFrame};
 use bytes::{BufMut, Bytes, BytesMut};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -211,7 +211,7 @@ impl ScriptData {
         self
     }
 
-    pub fn with_audio(mut self, sample_rate: f64, channels: f64) -> Self {
+    pub fn with_audio(mut self, _sample_rate: f64, _channels: f64) -> Self {
         self.audio_codec_id = Some(10.0); // AAC
         self
     }
@@ -326,7 +326,7 @@ impl FlvBatchEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::media::{CodecType, VideoFrameType};
+    use crate::media::{CodecType, Timestamp, VideoFrameType};
 
     #[test]
     fn test_flv_encoder() {

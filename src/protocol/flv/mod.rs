@@ -8,8 +8,8 @@
 //! - FLV demuxer (decoder) for parsing FLV streams
 //! - HTTP-FLV server for streaming over HTTP
 
-use crate::media::{CodecType, FrameType, MediaFrame, Timestamp};
 use crate::media::frame::{AudioFrameType, VideoFrameType as MediaVideoFrameType};
+use crate::media::{CodecType, FrameType, MediaFrame};
 use crate::protocol::common::{
     AacPacketType, AvcPacketType, SoundFormat, SoundRate, TagType, VideoCodecId, VideoFrameType,
 };
@@ -23,7 +23,7 @@ pub mod writer;
 
 pub use decoder::FlvDecoder;
 pub use encoder::FlvEncoder;
-pub use http_server::{HttpFlvServer, HttpFlvConfig};
+pub use http_server::{HttpFlvConfig, HttpFlvServer};
 pub use writer::FlvWriter;
 
 /// FLV header magic bytes
@@ -221,8 +221,8 @@ impl FlvTagHeader {
 pub struct AudioTagHeader {
     pub sound_format: SoundFormat,
     pub sound_rate: SoundRate,
-    pub sound_size: u8, // 0 = 8-bit, 1 = 16-bit
-    pub sound_type: u8, // 0 = mono, 1 = stereo
+    pub sound_size: u8,                         // 0 = 8-bit, 1 = 16-bit
+    pub sound_type: u8,                         // 0 = mono, 1 = stereo
     pub aac_packet_type: Option<AacPacketType>, // Only for AAC
 }
 
@@ -354,8 +354,7 @@ impl VideoTagHeader {
         let (avc_packet_type, composition_time) =
             if codec_id == VideoCodecId::Avc && data.len() >= 5 {
                 let packet_type = AvcPacketType::from_u8(data[1])?;
-                let cts =
-                    ((data[2] as i32) << 16) | ((data[3] as i32) << 8) | (data[4] as i32);
+                let cts = ((data[2] as i32) << 16) | ((data[3] as i32) << 8) | (data[4] as i32);
                 // Sign extend if negative
                 let cts = if cts & 0x800000 != 0 {
                     cts | !0xFFFFFF

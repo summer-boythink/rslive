@@ -1,14 +1,14 @@
 //! HTTP-FLV server for streaming FLV over HTTP
 
 use super::{FlvEncoder, FlvError, FlvResult};
-use crate::media::{MediaFrame, StreamRouter};
 use crate::media::router::{StreamId, StreamSubscriber};
+use crate::media::{MediaFrame, StreamRouter};
 use bytes::Bytes;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// HTTP-FLV server configuration
 #[derive(Debug, Clone)]
@@ -157,9 +157,7 @@ async fn handle_live_stream(
             .header("Access-Control-Allow-Headers", "*");
     }
 
-    builder
-        .body(axum::body::Body::from_stream(stream))
-        .unwrap()
+    builder.body(axum::body::Body::from_stream(stream)).unwrap()
 }
 
 /// Stream FLV data to subscriber
@@ -175,12 +173,12 @@ async fn stream_flv(
 
     // Send header
     if let Some(header) = encoder.header() {
-        tx.send(Ok(header))
-            .await
-            .map_err(|_| FlvError::Io(std::io::Error::new(
+        tx.send(Ok(header)).await.map_err(|_| {
+            FlvError::Io(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
-                "Channel closed"
-            )))?;
+                "Channel closed",
+            ))
+        })?;
     }
 
     // Stream frames

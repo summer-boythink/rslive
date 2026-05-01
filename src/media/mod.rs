@@ -11,7 +11,9 @@ pub mod router;
 pub mod track;
 
 pub use frame::{AudioFrame, AudioFrameType, FrameType, MediaFrame, VideoFrame, VideoFrameType};
-pub use router::{RouterConfig, StreamId, StreamRouter, StreamSink, StreamSource, StreamSubscriber};
+pub use router::{
+    RouterConfig, StreamId, StreamRouter, StreamSink, StreamSource, StreamSubscriber,
+};
 pub use track::{MediaTrack, TrackInfo, TrackType};
 
 /// Codec types supported across all protocols

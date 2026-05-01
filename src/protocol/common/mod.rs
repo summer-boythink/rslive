@@ -1,7 +1,6 @@
 //! Common types and utilities shared across protocols
 
-use crate::media::{CodecType, Timestamp};
-use bytes::Bytes;
+use crate::media::CodecType;
 
 /// Tag types for FLV and similar formats
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,7 +208,7 @@ impl VideoFrameType {
 
 /// Utility functions for protocol handling
 pub mod utils {
-    use bytes::{Buf, BufMut, Bytes, BytesMut};
+    use bytes::{Buf, BufMut};
 
     /// Read a 24-bit big-endian integer
     pub fn read_u24(buf: &mut impl Buf) -> u32 {
@@ -241,7 +240,6 @@ pub mod utils {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::utils::*;
     use bytes::BytesMut;
 

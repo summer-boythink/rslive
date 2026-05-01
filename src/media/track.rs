@@ -1,10 +1,10 @@
 //! Media track management for multi-track streams
 
-use super::{CodecType, MediaError, MediaResult, Timestamp};
+use super::{CodecType, Timestamp};
 use bytes::Bytes;
 use dashmap::DashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 /// Type of media track
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -208,7 +208,8 @@ impl MediaTrack {
     }
 
     pub fn record_frame(&self, timestamp: Timestamp, size: usize, is_keyframe: bool) {
-        self.last_timestamp.store(timestamp.as_nanos(), Ordering::Relaxed);
+        self.last_timestamp
+            .store(timestamp.as_nanos(), Ordering::Relaxed);
         self.total_bytes.fetch_add(size as u64, Ordering::Relaxed);
         self.frame_count.fetch_add(1, Ordering::Relaxed);
         if is_keyframe {
@@ -379,8 +380,8 @@ mod tests {
     fn test_track_manager() {
         let manager = TrackManager::new();
 
-        let (video_id, video_track) = manager.add_video_track(CodecType::H264);
-        let (audio_id, audio_track) = manager.add_audio_track(CodecType::AAC);
+        let (video_id, _video_track) = manager.add_video_track(CodecType::H264);
+        let (audio_id, _audio_track) = manager.add_audio_track(CodecType::AAC);
 
         assert_eq!(manager.len(), 2);
 

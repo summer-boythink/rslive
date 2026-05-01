@@ -1,17 +1,15 @@
 //! HLS packager for converting MediaFrames to HLS segments and playlists
 
 use super::{
+    HlsResult,
     m3u8::{MediaPlaylist, PartInfo, PreloadHint, SegmentEntry, ServerControl},
     segment::{Segment, SegmentFormat, SegmentStorage},
-    HlsConfig, HlsError, HlsResult, PlaylistType,
 };
-use crate::media::{FrameType, MediaFrame, Timestamp};
-use crate::media::router::{StreamId, StreamSubscriber};
-use bytes::Bytes;
+use crate::media::{MediaFrame, StreamId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::info;
 
 /// Packager configuration
 #[derive(Debug, Clone)]
@@ -185,7 +183,9 @@ impl HlsPackager {
         }
 
         // Find a good split point (keyframe)
-        let split_index = state.last_keyframe_index.unwrap_or(state.current_segment.len());
+        let split_index = state
+            .last_keyframe_index
+            .unwrap_or(state.current_segment.len());
 
         // Take frames up to split point
         let frames: Vec<_> = state.current_segment.drain(..split_index).collect();
@@ -195,11 +195,8 @@ impl HlsPackager {
         }
 
         // Create segment
-        let segment = Segment::from_frames(
-            state.segment_index,
-            &frames,
-            self.config.segment_format,
-        )?;
+        let segment =
+            Segment::from_frames(state.segment_index, &frames, self.config.segment_format)?;
 
         let segment_info = segment.info.clone();
         let segment_index = segment.info.index;
@@ -208,10 +205,7 @@ impl HlsPackager {
         self.storage.store(&segment)?;
 
         // Add to playlist
-        let entry = SegmentEntry::new(
-            segment_info.duration.as_secs_f64(),
-            segment_info.filename(),
-        );
+        let entry = SegmentEntry::new(segment_info.duration.as_secs_f64(), segment_info.filename());
         state.playlist.add_segment(entry);
 
         // Trim playlist to maintain sliding window
@@ -254,7 +248,10 @@ impl HlsPackager {
         // Create partial segment
         let part = PartInfo {
             duration: state.partial_duration().as_secs_f64(),
-            uri: format!("segment{}_p{}.m4s", state.segment_index, state.partial_index),
+            uri: format!(
+                "segment{}_p{}.m4s",
+                state.segment_index, state.partial_index
+            ),
             independent: has_keyframe,
         };
 
@@ -268,7 +265,11 @@ impl HlsPackager {
         // Update preload hint
         state.playlist.set_preload_hint(PreloadHint {
             segment_type: "PART".to_string(),
-            uri: format!("segment{}_p{}.m4s", state.segment_index, state.partial_index + 1),
+            uri: format!(
+                "segment{}_p{}.m4s",
+                state.segment_index,
+                state.partial_index + 1
+            ),
         });
 
         state.partial_index += 1;
@@ -301,18 +302,13 @@ impl HlsPackager {
         if !state.current_segment.is_empty() {
             let frames: Vec<_> = state.current_segment.drain(..).collect();
 
-            let segment = Segment::from_frames(
-                state.segment_index,
-                &frames,
-                self.config.segment_format,
-            )?;
+            let segment =
+                Segment::from_frames(state.segment_index, &frames, self.config.segment_format)?;
 
             self.storage.store(&segment)?;
 
-            let entry = SegmentEntry::new(
-                segment.info.duration.as_secs_f64(),
-                segment.info.filename(),
-            );
+            let entry =
+                SegmentEntry::new(segment.info.duration.as_secs_f64(), segment.info.filename());
             state.playlist.add_segment(entry);
         }
 
@@ -368,27 +364,27 @@ impl HlsPackagerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::media::{CodecType, VideoFrameType};
+    use crate::media::{CodecType, Timestamp, VideoFrameType};
+    use bytes::Bytes;
 
     #[tokio::test]
     async fn test_packager() {
         let config = PackagerConfig::default();
-        let storage: Arc<dyn SegmentStorage> = Arc::new(
-            super::super::segment::MemorySegmentStorage::new(100)
-        );
+        let storage: Arc<dyn SegmentStorage> =
+            Arc::new(super::super::segment::MemorySegmentStorage::new(100));
 
-        let packager = HlsPackager::new(
-            StreamId::new("test"),
-            config,
-            storage,
-        );
+        let packager = HlsPackager::new(StreamId::new("test"), config, storage);
 
         // Add frames
         for i in 0..100 {
             let frame = MediaFrame::video(
                 1,
                 Timestamp::from_millis(i as u64 * 100),
-                if i % 30 == 0 { VideoFrameType::Keyframe } else { VideoFrameType::Interframe },
+                if i % 30 == 0 {
+                    VideoFrameType::Keyframe
+                } else {
+                    VideoFrameType::Interframe
+                },
                 CodecType::H264,
                 Bytes::from(vec![0; 1000]),
             );

@@ -509,8 +509,6 @@ impl Amf3Decoder {
 
     /// Read a U29 variable-length integer
     fn read_u29_int<R: Read>(&mut self, reader: &mut R) -> Result<u32, io::Error> {
-        let mut result = 0u32;
-
         // Read first byte
         let byte1 = reader.read_u8()?;
         if (byte1 & 0x80) == 0 {
@@ -520,7 +518,7 @@ impl Amf3Decoder {
 
         // Read second byte
         let byte2 = reader.read_u8()?;
-        result = ((byte1 & 0x7F) as u32) << 7 | (byte2 & 0x7F) as u32;
+        let mut result = ((byte1 & 0x7F) as u32) << 7 | (byte2 & 0x7F) as u32;
         if (byte2 & 0x80) == 0 {
             // 2 bytes: 1xxxxxxx 0xxxxxxx
             return Ok(result);

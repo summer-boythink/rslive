@@ -18,9 +18,9 @@ pub mod packager;
 pub mod segment;
 pub mod server;
 
-pub use m3u8::{MediaPlaylist, MasterPlaylist, PlaylistType};
+pub use m3u8::{MasterPlaylist, MediaPlaylist, PlaylistType};
 pub use packager::{HlsPackager, HlsPackagerManager, PackagerConfig};
-pub use segment::{Segment, SegmentFormat, SegmentInfo, MemorySegmentStorage};
+pub use segment::{MemorySegmentStorage, Segment, SegmentFormat, SegmentInfo};
 pub use server::{HlsServer, ServerConfig};
 
 /// HLS configuration

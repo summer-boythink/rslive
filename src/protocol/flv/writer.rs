@@ -1,7 +1,7 @@
 //! FLV file writer for recording streams to disk
 
-use super::{FlvEncoder, FlvError, FlvResult};
 use super::encoder::ScriptData;
+use super::{FlvEncoder, FlvError, FlvResult};
 use crate::media::MediaFrame;
 use std::path::Path;
 use tokio::fs::File;
@@ -70,11 +70,7 @@ impl WriterConfig {
 
 impl FlvWriter {
     /// Create a new FLV writer
-    pub async fn new<P: AsRef<Path>>(
-        path: P,
-        has_video: bool,
-        has_audio: bool,
-    ) -> FlvResult<Self> {
+    pub async fn new<P: AsRef<Path>>(path: P, has_video: bool, has_audio: bool) -> FlvResult<Self> {
         Self::with_config(path, has_video, has_audio, WriterConfig::default()).await
     }
 
@@ -89,9 +85,9 @@ impl FlvWriter {
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                FlvError::Io(e)
-            })?;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| FlvError::Io(e))?;
         }
 
         let file = File::create(&path).await.map_err(|e| FlvError::Io(e))?;
@@ -142,14 +138,16 @@ impl FlvWriter {
             self.rotate().await?;
         }
 
-        let file = self.file.as_mut().ok_or_else(|| {
-            FlvError::InvalidData("Writer not started".into())
-        })?;
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| FlvError::InvalidData("Writer not started".into()))?;
 
         // Encode frame
-        let data = self.encoder.encode_frame(frame)?.ok_or_else(|| {
-            FlvError::InvalidData("Failed to encode frame".into())
-        })?;
+        let data = self
+            .encoder
+            .encode_frame(frame)?
+            .ok_or_else(|| FlvError::InvalidData("Failed to encode frame".into()))?;
 
         // Write to file
         file.write_all(&data).await.map_err(|e| FlvError::Io(e))?;
@@ -200,7 +198,12 @@ impl FlvWriter {
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
         let stem = self.path.file_stem().unwrap_or_default();
         let ext = self.path.extension().unwrap_or_default();
-        let new_name = format!("{}_{}.{}", stem.to_string_lossy(), timestamp, ext.to_string_lossy());
+        let new_name = format!(
+            "{}_{}.{}",
+            stem.to_string_lossy(),
+            timestamp,
+            ext.to_string_lossy()
+        );
 
         let new_path = self.path.with_file_name(new_name);
 
@@ -341,12 +344,10 @@ impl RotatingFlvWriter {
         let ext = self.base_path.extension().unwrap_or_default();
 
         let new_name = if self.files_created == 0 {
-            format!("{}.{}",
-                stem.to_string_lossy(),
-                ext.to_string_lossy()
-            )
+            format!("{}.{}", stem.to_string_lossy(), ext.to_string_lossy())
         } else {
-            format!("{}_{}_{}.{}",
+            format!(
+                "{}_{}_{}.{}",
                 stem.to_string_lossy(),
                 timestamp,
                 self.files_created,
@@ -362,7 +363,8 @@ impl RotatingFlvWriter {
             self.has_video,
             self.has_audio,
             self.config.clone(),
-        ).await?;
+        )
+        .await?;
 
         writer.start().await?;
 

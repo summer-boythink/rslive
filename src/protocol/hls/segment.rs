@@ -110,8 +110,7 @@ impl Segment {
 
         let starts_with_keyframe = frames[0].is_keyframe();
 
-        let mut info = SegmentInfo::new(index, start_time, duration)
-            .with_format(format);
+        let mut info = SegmentInfo::new(index, start_time, duration).with_format(format);
         info.starts_with_keyframe = starts_with_keyframe;
 
         // Encode frames based on format
@@ -180,7 +179,7 @@ fn encode_ts_segment(frames: &[MediaFrame]) -> HlsResult<Bytes> {
 }
 
 /// Encode frames to fMP4 segment
-fn encode_fmp4_segment(frames: &[MediaFrame]) -> HlsResult<Bytes> {
+fn encode_fmp4_segment(_frames: &[MediaFrame]) -> HlsResult<Bytes> {
     // This is a placeholder - real implementation would:
     // 1. Create moof (movie fragment) box
     // 2. Create mdat box with sample data
@@ -209,8 +208,7 @@ fn create_pat() -> Bytes {
         0xC1, // Version + current_next
         0x00, 0x00, // Section number / last section number
         // Program 1 -> PMT PID 0x100
-        0x00, 0x01, 0xF0, 0x00,
-        // CRC32 (placeholder)
+        0x00, 0x01, 0xF0, 0x00, // CRC32 (placeholder)
         0x00, 0x00, 0x00, 0x00,
     ]);
 
@@ -298,9 +296,9 @@ fn write_pts(buf: &mut Vec<u8>, pts: u64, prefix: u8) {
     let pts_33 = pts & 0x1FFFFFFFF;
 
     buf.push(prefix | ((pts_33 >> 29) as u8 & 0x0E) | 0x01);
-    buf.push(((pts_33 >> 22) as u8 & 0xFF));
+    buf.push((pts_33 >> 22) as u8 & 0xFF);
     buf.push(((pts_33 >> 14) as u8 & 0xFE) | 0x01);
-    buf.push(((pts_33 >> 7) as u8 & 0xFF));
+    buf.push((pts_33 >> 7) as u8 & 0xFF);
     buf.push(((pts_33 << 1) as u8 & 0xFE) | 0x01);
 }
 
@@ -329,7 +327,8 @@ impl MemorySegmentStorage {
     fn enforce_limits(&self) {
         while self.segments.len() > self.max_segments {
             // Remove oldest segment
-            let oldest = self.segments
+            let oldest = self
+                .segments
                 .iter()
                 .map(|e| (*e.key(), e.value().info.start_time))
                 .min_by_key(|(_, ts)| ts.as_nanos());
@@ -343,13 +342,16 @@ impl MemorySegmentStorage {
 
 impl SegmentStorage for MemorySegmentStorage {
     fn store(&self, segment: &Segment) -> HlsResult<()> {
-        self.segments.insert(segment.info.index, Segment {
-            info: segment.info.clone(),
-            data: segment.data.clone(),
-            video_codec: segment.video_codec,
-            audio_codec: segment.audio_codec,
-            complete: segment.complete,
-        });
+        self.segments.insert(
+            segment.info.index,
+            Segment {
+                info: segment.info.clone(),
+                data: segment.data.clone(),
+                video_codec: segment.video_codec,
+                audio_codec: segment.audio_codec,
+                complete: segment.complete,
+            },
+        );
 
         self.enforce_limits();
         Ok(())
@@ -371,7 +373,8 @@ impl SegmentStorage for MemorySegmentStorage {
     }
 
     fn list(&self) -> HlsResult<Vec<SegmentInfo>> {
-        let mut segments: Vec<_> = self.segments
+        let mut segments: Vec<_> = self
+            .segments
             .iter()
             .map(|e| e.value().info.clone())
             .collect();
@@ -399,27 +402,23 @@ impl SegmentStorage for FileSegmentStorage {
         let path = self.output_dir.join(segment.info.filename());
 
         // Ensure directory exists
-        std::fs::create_dir_all(&self.output_dir)
-            .map_err(|e| HlsError::Io(e))?;
+        std::fs::create_dir_all(&self.output_dir).map_err(|e| HlsError::Io(e))?;
 
         // Write segment
-        std::fs::write(&path, &segment.data)
-            .map_err(|e| HlsError::Io(e))?;
+        std::fs::write(&path, &segment.data).map_err(|e| HlsError::Io(e))?;
 
         Ok(())
     }
 
     fn load(&self, index: u64) -> HlsResult<Option<Segment>> {
         // Try to find segment by index
-        for entry in std::fs::read_dir(&self.output_dir)
-            .map_err(|e| HlsError::Io(e))? {
+        for entry in std::fs::read_dir(&self.output_dir).map_err(|e| HlsError::Io(e))? {
             let entry = entry.map_err(|e| HlsError::Io(e))?;
             let filename = entry.file_name();
             let name = filename.to_string_lossy();
 
             if name.starts_with(&format!("segment{}", index)) {
-                let data = std::fs::read(entry.path())
-                    .map_err(|e| HlsError::Io(e))?;
+                let data = std::fs::read(entry.path()).map_err(|e| HlsError::Io(e))?;
 
                 // Parse info from file
                 let format = if name.ends_with(".ts") {
@@ -428,8 +427,8 @@ impl SegmentStorage for FileSegmentStorage {
                     SegmentFormat::Fmp4
                 };
 
-                let info = SegmentInfo::new(index, Timestamp::ZERO, Duration::ZERO)
-                    .with_format(format);
+                let info =
+                    SegmentInfo::new(index, Timestamp::ZERO, Duration::ZERO).with_format(format);
 
                 return Ok(Some(Segment::new(info, Bytes::from(data))));
             }
@@ -440,7 +439,9 @@ impl SegmentStorage for FileSegmentStorage {
 
     fn delete(&self, index: u64) -> HlsResult<()> {
         for format in [SegmentFormat::MpegTs, SegmentFormat::Fmp4] {
-            let path = self.output_dir.join(format!("segment{}{}", index, format.file_extension()));
+            let path = self
+                .output_dir
+                .join(format!("segment{}{}", index, format.file_extension()));
             if path.exists() {
                 std::fs::remove_file(&path).map_err(|e| HlsError::Io(e))?;
             }
@@ -451,8 +452,7 @@ impl SegmentStorage for FileSegmentStorage {
     fn list(&self) -> HlsResult<Vec<SegmentInfo>> {
         let mut segments = Vec::new();
 
-        for entry in std::fs::read_dir(&self.output_dir)
-            .map_err(|e| HlsError::Io(e))? {
+        for entry in std::fs::read_dir(&self.output_dir).map_err(|e| HlsError::Io(e))? {
             let entry = entry.map_err(|e| HlsError::Io(e))?;
             let name = entry.file_name().to_string_lossy().to_string();
 

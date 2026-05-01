@@ -1,6 +1,5 @@
 //! M3U8 playlist generation and parsing
 
-use super::{HlsConfig, HlsError, HlsResult};
 use std::fmt::Write;
 use std::time::Duration;
 
@@ -181,7 +180,11 @@ impl MediaPlaylist {
                     "#EXT-X-PART:DURATION={:.3},URI=\"{}\"{}",
                     part.duration,
                     part.uri,
-                    if part.independent { ",INDEPENDENT=YES" } else { "" }
+                    if part.independent {
+                        ",INDEPENDENT=YES"
+                    } else {
+                        ""
+                    }
                 )
                 .unwrap();
             }
@@ -191,12 +194,7 @@ impl MediaPlaylist {
         for segment in &self.segments {
             if let Some(ref byterange) = segment.byterange {
                 if let Some(offset) = byterange.offset {
-                    writeln!(
-                        output,
-                        "#EXT-X-BYTERANGE:{}@{}",
-                        byterange.length, offset
-                    )
-                    .unwrap();
+                    writeln!(output, "#EXT-X-BYTERANGE:{}@{}", byterange.length, offset).unwrap();
                 } else {
                     writeln!(output, "#EXT-X-BYTERANGE:{}", byterange.length).unwrap();
                 }
@@ -215,12 +213,7 @@ impl MediaPlaylist {
                 .unwrap();
             }
 
-            writeln!(
-                output,
-                "#EXTINF:{:.3},\n{}",
-                segment.duration, segment.uri
-            )
-            .unwrap();
+            writeln!(output, "#EXTINF:{:.3},\n{}", segment.duration, segment.uri).unwrap();
         }
 
         // Preload hint for LL-HLS

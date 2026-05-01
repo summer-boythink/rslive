@@ -13,7 +13,7 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust
+//! ```rust,no_run
 //! use rslive::rtmp::RtmpServer;
 //!
 //! fn main() -> anyhow::Result<()> {

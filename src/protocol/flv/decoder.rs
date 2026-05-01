@@ -3,11 +3,10 @@
 use super::{
     AudioTagHeader, FlvError, FlvHeader, FlvResult, FlvTagHeader, TagType, VideoTagHeader,
 };
-use crate::media::{CodecType, FrameType, MediaFrame, Timestamp};
 use crate::media::frame::{AudioFrameType, VideoFrameType};
-use crate::protocol::common::{AacPacketType, AvcPacketType, SoundFormat, VideoCodecId};
+use crate::media::{CodecType, FrameType, MediaFrame, Timestamp};
+use crate::protocol::common::{SoundFormat, VideoCodecId};
 use bytes::{Buf, Bytes, BytesMut};
-use std::io::Cursor;
 
 /// FLV decoder for demuxing FLV streams into MediaFrames
 pub struct FlvDecoder {
@@ -66,9 +65,8 @@ impl FlvDecoder {
             return Ok(None);
         }
 
-        let header = FlvHeader::decode(&self.buffer).ok_or_else(|| {
-            FlvError::InvalidData("Failed to parse FLV header".into())
-        })?;
+        let header = FlvHeader::decode(&self.buffer)
+            .ok_or_else(|| FlvError::InvalidData("Failed to parse FLV header".into()))?;
 
         self.has_video = header.flags.has_video;
         self.has_audio = header.flags.has_audio;
@@ -93,13 +91,11 @@ impl FlvDecoder {
         }
 
         // Parse tag header
-        let tag_header = FlvTagHeader::decode(&self.buffer).ok_or_else(|| {
-            FlvError::InvalidData("Failed to parse tag header".into())
-        })?;
+        let tag_header = FlvTagHeader::decode(&self.buffer)
+            .ok_or_else(|| FlvError::InvalidData("Failed to parse tag header".into()))?;
 
-        let total_size = super::FLV_TAG_HEADER_SIZE
-            + tag_header.data_size as usize
-            + super::PREVIOUS_TAG_SIZE;
+        let total_size =
+            super::FLV_TAG_HEADER_SIZE + tag_header.data_size as usize + super::PREVIOUS_TAG_SIZE;
 
         if self.buffer.len() < total_size {
             self.needed = total_size;
@@ -130,21 +126,20 @@ impl FlvDecoder {
     }
 
     /// Parse video tag data
-    fn parse_video_tag(
-        &mut self,
-        timestamp: u32,
-        data: Bytes,
-    ) -> FlvResult<Option<MediaFrame>> {
+    fn parse_video_tag(&mut self, timestamp: u32, data: Bytes) -> FlvResult<Option<MediaFrame>> {
         if data.is_empty() {
             return Ok(None);
         }
 
-        let header = VideoTagHeader::decode(&data).ok_or_else(|| {
-            FlvError::InvalidData("Failed to parse video tag header".into())
-        })?;
+        let header = VideoTagHeader::decode(&data)
+            .ok_or_else(|| FlvError::InvalidData("Failed to parse video tag header".into()))?;
 
         // Skip video header bytes
-        let header_len = if header.avc_packet_type.is_some() { 5 } else { 1 };
+        let header_len = if header.avc_packet_type.is_some() {
+            5
+        } else {
+            1
+        };
         let frame_data = data.slice(header_len..);
 
         // Cache sequence header
@@ -196,21 +191,20 @@ impl FlvDecoder {
     }
 
     /// Parse audio tag data
-    fn parse_audio_tag(
-        &mut self,
-        timestamp: u32,
-        data: Bytes,
-    ) -> FlvResult<Option<MediaFrame>> {
+    fn parse_audio_tag(&mut self, timestamp: u32, data: Bytes) -> FlvResult<Option<MediaFrame>> {
         if data.is_empty() {
             return Ok(None);
         }
 
-        let header = AudioTagHeader::decode(&data).ok_or_else(|| {
-            FlvError::InvalidData("Failed to parse audio tag header".into())
-        })?;
+        let header = AudioTagHeader::decode(&data)
+            .ok_or_else(|| FlvError::InvalidData("Failed to parse audio tag header".into()))?;
 
         // Skip audio header bytes
-        let header_len = if header.aac_packet_type.is_some() { 2 } else { 1 };
+        let header_len = if header.aac_packet_type.is_some() {
+            2
+        } else {
+            1
+        };
         let frame_data = data.slice(header_len..);
 
         // Cache sequence header

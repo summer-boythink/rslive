@@ -3,7 +3,6 @@
 //! Usage:
 //!   rslive-server [--rtmp-port 1935] [--http-port 8080]
 
-use std::sync::Arc;
 use tracing::info;
 
 fn main() -> anyhow::Result<()> {

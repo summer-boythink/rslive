@@ -1,13 +1,13 @@
 //! Stream router for zero-copy forwarding between publishers and subscribers
 
-use super::{MediaError, MediaFrame, MediaResult, Timestamp};
 use super::frame::{DataFrameType, FrameType};
+use super::{MediaError, MediaFrame, MediaResult, Timestamp};
 use bytes::Bytes;
 use dashmap::DashMap;
 use flume::{Receiver, Sender};
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tracing::{debug, trace, warn};
 
@@ -104,7 +104,7 @@ pub(crate) struct StreamState {
     subscribers: Vec<Sender<MediaFrame>>,
     stats: Arc<StreamStats>,
     keyframe_cache: Arc<RwLock<Vec<MediaFrame>>>,
-    created_at: std::time::Instant,
+    _created_at: std::time::Instant,
 }
 
 impl StreamState {
@@ -113,7 +113,7 @@ impl StreamState {
             subscribers: Vec::new(),
             stats: Arc::new(StreamStats::default()),
             keyframe_cache: Arc::new(RwLock::new(Vec::with_capacity(config.keyframe_cache_size))),
-            created_at: std::time::Instant::now(),
+            _created_at: std::time::Instant::now(),
         }
     }
 }
@@ -280,20 +280,16 @@ impl StreamPublisher {
 pub struct StreamSubscriber {
     stream_id: StreamId,
     receiver: Receiver<MediaFrame>,
-    stats: Arc<StreamStats>,
+    _stats: Arc<StreamStats>,
     start_time: std::time::Instant,
 }
 
 impl StreamSubscriber {
-    fn new(
-        stream_id: StreamId,
-        receiver: Receiver<MediaFrame>,
-        stats: Arc<StreamStats>,
-    ) -> Self {
+    fn new(stream_id: StreamId, receiver: Receiver<MediaFrame>, stats: Arc<StreamStats>) -> Self {
         Self {
             stream_id,
             receiver,
-            stats,
+            _stats: stats,
             start_time: std::time::Instant::now(),
         }
     }
@@ -412,7 +408,9 @@ impl StreamRouter {
             "Publisher registered"
         );
 
-        self.global_stats.publisher_count.fetch_add(1, Ordering::Relaxed);
+        self.global_stats
+            .publisher_count
+            .fetch_add(1, Ordering::Relaxed);
 
         Ok(publisher)
     }
@@ -421,9 +419,10 @@ impl StreamRouter {
     pub fn subscribe(&self, stream_id: &StreamId) -> MediaResult<StreamSubscriber> {
         // Check if stream exists and get info
         let (stats, cache_keyframe, keyframe_cache) = {
-            let entry = self.streams.get(stream_id).ok_or_else(|| {
-                MediaError::StreamNotFound(stream_id.as_str().to_string())
-            })?;
+            let entry = self
+                .streams
+                .get(stream_id)
+                .ok_or_else(|| MediaError::StreamNotFound(stream_id.as_str().to_string()))?;
 
             if entry.subscribers.len() >= self.config.max_subscribers {
                 return Err(MediaError::Router(format!(
@@ -458,18 +457,16 @@ impl StreamRouter {
             entry.subscribers.push(sender);
         }
 
-        let subscriber = StreamSubscriber::new(
-            stream_id.clone(),
-            receiver,
-            stats,
-        );
+        let subscriber = StreamSubscriber::new(stream_id.clone(), receiver, stats);
 
         debug!(
             stream_id = %stream_id.as_str(),
             "Subscriber added"
         );
 
-        self.global_stats.subscriber_count.fetch_add(1, Ordering::Relaxed);
+        self.global_stats
+            .subscriber_count
+            .fetch_add(1, Ordering::Relaxed);
 
         Ok(subscriber)
     }
@@ -489,7 +486,9 @@ impl StreamRouter {
                 "Subscriber removed"
             );
 
-            self.global_stats.subscriber_count.fetch_sub(1, Ordering::Relaxed);
+            self.global_stats
+                .subscriber_count
+                .fetch_sub(1, Ordering::Relaxed);
         }
     }
 
@@ -503,7 +502,9 @@ impl StreamRouter {
             "Publisher removed"
         );
 
-        self.global_stats.publisher_count.fetch_sub(1, Ordering::Relaxed);
+        self.global_stats
+            .publisher_count
+            .fetch_sub(1, Ordering::Relaxed);
     }
 
     /// Remove a stream entirely
@@ -560,7 +561,8 @@ impl Default for StreamStats {
 impl StreamStats {
     fn record_frame(&self, frame: &MediaFrame) {
         self.frames_published.fetch_add(1, Ordering::Relaxed);
-        self.bytes_published.fetch_add(frame.size() as u64, Ordering::Relaxed);
+        self.bytes_published
+            .fetch_add(frame.size() as u64, Ordering::Relaxed);
 
         let now = std::time::Instant::now();
         *self.last_frame_time.write() = Some(now);
