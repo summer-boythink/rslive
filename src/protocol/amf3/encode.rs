@@ -6,6 +6,9 @@ use std::{
 
 use super::{Amf3Value, *};
 
+/// Maximum recursion depth to prevent stack overflow
+const MAX_RECURSION_DEPTH: usize = 256;
+
 pub struct Amf3Encoder {
     /// String reference table for deduplication
     string_table: HashMap<String, usize>,
@@ -13,6 +16,8 @@ pub struct Amf3Encoder {
     object_table: Vec<Amf3Value>,
     /// Class definition reference table
     trait_table: Vec<ClassDefinition>,
+    /// Current recursion depth
+    recursion_depth: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,11 +34,31 @@ impl Amf3Encoder {
             string_table: HashMap::new(),
             object_table: Vec::new(),
             trait_table: Vec::new(),
+            recursion_depth: 0,
         }
     }
 
     /// Encode AMF3 value to writer
     pub fn encode<W: Write>(
+        &mut self,
+        writer: &mut W,
+        value: &Amf3Value,
+    ) -> Result<usize, io::Error> {
+        // Check recursion depth
+        if self.recursion_depth > MAX_RECURSION_DEPTH {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Maximum recursion depth exceeded: {}", MAX_RECURSION_DEPTH),
+            ));
+        }
+
+        self.recursion_depth += 1;
+        let result = self.encode_inner(writer, value);
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn encode_inner<W: Write>(
         &mut self,
         writer: &mut W,
         value: &Amf3Value,
@@ -606,23 +631,16 @@ impl Amf3Encoder {
             (Amf3Value::True, Amf3Value::True) => true,
             (Amf3Value::Integer(a), Amf3Value::Integer(b)) => a == b,
             (Amf3Value::Double(a), Amf3Value::Double(b)) => {
-                // Handle NaN and floating point comparison
-                if a.is_nan() && b.is_nan() {
-                    true
-                } else {
-                    (a - b).abs() < f64::EPSILON
-                }
+                // Use bit pattern comparison for exact equality
+                // This handles NaN correctly (NaN != NaN in IEEE 754)
+                a.to_bits() == b.to_bits()
             }
             (Amf3Value::String(a), Amf3Value::String(b)) => a == b,
             (Amf3Value::XmlDoc(a), Amf3Value::XmlDoc(b)) => a == b,
             (Amf3Value::Xml(a), Amf3Value::Xml(b)) => a == b,
             (Amf3Value::Date(a), Amf3Value::Date(b)) => {
-                // Handle NaN timestamps
-                if a.is_nan() && b.is_nan() {
-                    true
-                } else {
-                    (a - b).abs() < f64::EPSILON
-                }
+                // Use bit pattern comparison for exact equality
+                a.to_bits() == b.to_bits()
             }
             (Amf3Value::ByteArray(a), Amf3Value::ByteArray(b)) => a == b,
             (
@@ -732,10 +750,8 @@ impl Amf3Encoder {
                     return false;
                 }
                 for (va, vb) in ia.iter().zip(ib.iter()) {
-                    if va.is_nan() && vb.is_nan() {
-                        continue;
-                    }
-                    if (va - vb).abs() >= f64::EPSILON {
+                    // Use bit pattern comparison for exact equality
+                    if va.to_bits() != vb.to_bits() {
                         return false;
                     }
                 }

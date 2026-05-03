@@ -4,15 +4,14 @@ use std::io::{self, Write};
 use crate::protocol::amf0::{Amf0Value, *};
 
 pub struct Amf0Encoder {
-    /// Reference cache for handling AMF0 references
-    _ref_cache: Vec<*const Amf0Value>,
+    // Note: Reference caching is not implemented because in RTMP scenarios,
+    // objects are typically encoded independently and references are rare.
+    // If reference support is needed in the future, add a HashMap-based cache here.
 }
 
 impl Amf0Encoder {
     pub fn new() -> Self {
-        Self {
-            _ref_cache: Vec::new(),
-        }
+        Self {}
     }
 
     /// Encode AMF0 value to writer

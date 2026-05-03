@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::protocol::amf0::{Amf0Value, *};
+use crate::protocol::amf3::Amf3Decoder;
 
 pub struct Amf0Decoder {
     /// Reference cache for handling AMF0 references
@@ -299,14 +300,22 @@ impl Amf0Decoder {
         Ok(result)
     }
 
-    fn decode_amf3_object<R: Read>(&mut self, _reader: &mut R) -> Result<Amf0Value, io::Error> {
-        // For AMF3 objects, we need to parse the AMF3 data properly
-        // For now, we'll return an error since AMF3 parsing is complex
-        // In a full implementation, this would delegate to an AMF3 decoder
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "AMF3 object decoding not implemented - requires separate AMF3 parser",
-        ))
+    fn decode_amf3_object<R: Read>(&mut self, reader: &mut R) -> Result<Amf0Value, io::Error> {
+        // Decode AMF3 object using the AMF3 decoder
+        let mut amf3_decoder = Amf3Decoder::new();
+        let amf3_value = amf3_decoder.decode(reader)?;
+
+        // Convert AMF3 value to AMF0 value
+        Ok(Amf0Value::Amf3Object(Self::amf3_to_bytes(&amf3_value)?))
+    }
+
+    /// Convert AMF3 value to bytes for storage in Amf3Object variant
+    fn amf3_to_bytes(value: &crate::protocol::amf3::Amf3Value) -> Result<Vec<u8>, io::Error> {
+        use crate::protocol::amf3::Amf3Encoder;
+        let mut buffer = Vec::new();
+        let mut encoder = Amf3Encoder::new();
+        encoder.encode(&mut buffer, value)?;
+        Ok(buffer)
     }
 }
 

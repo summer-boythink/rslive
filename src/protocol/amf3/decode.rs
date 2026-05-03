@@ -6,6 +6,9 @@ use std::{
 
 use super::{Amf3Value, *};
 
+/// Maximum recursion depth to prevent stack overflow
+const MAX_RECURSION_DEPTH: usize = 256;
+
 pub struct Amf3Decoder {
     /// String reference table
     string_table: Vec<String>,
@@ -13,6 +16,8 @@ pub struct Amf3Decoder {
     object_table: Vec<Amf3Value>,
     /// Class definition reference table
     trait_table: Vec<ClassDefinition>,
+    /// Current recursion depth
+    recursion_depth: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -29,11 +34,27 @@ impl Amf3Decoder {
             string_table: Vec::new(),
             object_table: Vec::new(),
             trait_table: Vec::new(),
+            recursion_depth: 0,
         }
     }
 
     /// Decode AMF3 value from reader
     pub fn decode<R: Read>(&mut self, reader: &mut R) -> Result<Amf3Value, io::Error> {
+        // Check recursion depth
+        if self.recursion_depth > MAX_RECURSION_DEPTH {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Maximum recursion depth exceeded: {}", MAX_RECURSION_DEPTH),
+            ));
+        }
+
+        self.recursion_depth += 1;
+        let result = self.decode_inner(reader);
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn decode_inner<R: Read>(&mut self, reader: &mut R) -> Result<Amf3Value, io::Error> {
         let marker = reader.read_u8()?;
 
         match marker {
