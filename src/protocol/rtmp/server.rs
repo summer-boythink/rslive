@@ -17,7 +17,11 @@ use super::{
     message::{AmfCommand, RtmpMessage},
     message_type, status,
 };
+use crate::media::{MediaFrame, StreamId, StreamPublisher, StreamRouter, Timestamp};
 use crate::protocol::amf0::Amf0Value;
+use crate::protocol::flv::{AudioTagHeader, VideoTagHeader};
+use crate::media::{CodecType, FrameType};
+use crate::media::frame::{AudioFrameType, VideoFrameType};
 
 /// RTMP Server for handling incoming client connections
 pub struct RtmpServer {
@@ -35,6 +39,10 @@ pub struct RtmpServer {
     event_handlers: EventHandlers,
     /// Active streams (stream_name -> StreamInfo)
     streams: DashMap<String, StreamInfo>,
+    /// Reference to StreamRouter for forwarding media frames
+    router: Option<Arc<StreamRouter>>,
+    /// Active publishers (stream_name -> StreamPublisher)
+    publishers: DashMap<String, StreamPublisher>,
 }
 
 /// Stream information on the server
@@ -95,7 +103,14 @@ impl RtmpServer {
             is_running: AtomicBool::new(false),
             event_handlers: EventHandlers::default(),
             streams: DashMap::new(),
+            router: None,
+            publishers: DashMap::new(),
         }
+    }
+
+    /// Set the StreamRouter for forwarding media frames
+    pub fn set_router(&mut self, router: Arc<StreamRouter>) {
+        self.router = Some(router);
     }
 
     /// Create server with default configuration
@@ -171,28 +186,35 @@ impl RtmpServer {
         let listener = TcpListener::bind(addr)
             .map_err(|e| RtmpError::ConnectionFailed(format!("Failed to bind: {}", e)))?;
 
+        // Set listener to blocking mode (avoid EAGAIN errors)
+        listener.set_nonblocking(false)?;
+
         self.listen_addr = Some(listener.local_addr()?);
         self.is_running.store(true, Ordering::SeqCst);
 
         println!("RTMP Server listening on {}", addr);
 
         // Accept connections
-        for stream in listener.incoming() {
+        loop {
             if !self.is_running.load(Ordering::SeqCst) {
                 break;
             }
 
-            match stream {
-                Ok(tcp_stream) => {
+            match listener.accept() {
+                Ok((tcp_stream, peer_addr)) => {
+                    println!("New client connected: {}", peer_addr);
+
                     let connection_id = self.get_next_connection_id();
                     let connection = Arc::new(Mutex::new(RtmpConnection::new(self.config.clone())));
 
-                    // Store connection (DashMap - no explicit lock needed)
+                    // Store connection
                     self.connections.insert(connection_id, connection.clone());
 
                     // Clone references for the spawned thread
                     let connections = self.connections.clone();
                     let streams = self.streams.clone();
+                    let router = self.router.clone();
+                    let publishers = self.publishers.clone();
 
                     thread::spawn(move || {
                         if let Err(e) = Self::handle_client_connection(
@@ -201,13 +223,21 @@ impl RtmpServer {
                             connection,
                             connections,
                             streams,
+                            router,
+                            publishers,
                         ) {
                             eprintln!("Connection {} error: {}", connection_id, e);
                         }
                     });
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // EAGAIN - temporary resource unavailable, retry
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
                 Err(e) => {
                     eprintln!("Failed to accept connection: {}", e);
+                    thread::sleep(Duration::from_millis(100));
                 }
             }
         }
@@ -291,22 +321,33 @@ impl RtmpServer {
         connection: Arc<Mutex<RtmpConnection>>,
         connections: DashMap<usize, Arc<Mutex<RtmpConnection>>>,
         streams: DashMap<String, StreamInfo>,
+        router: Option<Arc<StreamRouter>>,
+        publishers: DashMap<String, StreamPublisher>,
     ) -> RtmpResult<()> {
         println!("New connection: {}", connection_id);
 
-        // Set timeouts
+        // Ensure blocking mode for reliable handshake
+        stream.set_nonblocking(false)?;
+
+        // Set timeouts and TCP options
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         stream.set_write_timeout(Some(Duration::from_secs(30)))?;
 
-        // Perform handshake
+        // Disable Nagle's algorithm for lower latency
+        stream.set_nodelay(true)?;
+
+        // Perform handshake with better error handling
         {
             let mut conn = connection.lock().unwrap();
-            conn.server_handshake(&mut stream)?;
+            if let Err(e) = conn.server_handshake(&mut stream) {
+                println!("Connection {} handshake failed: {}", connection_id, e);
+                return Err(e);
+            }
         }
 
         // Main message processing loop
         loop {
-            let message = {
+            let message = match {
                 let mut conn = connection.lock().unwrap();
 
                 // Check for timeout
@@ -314,28 +355,66 @@ impl RtmpServer {
                     break;
                 }
 
-                conn.read_chunk(&mut stream)?
+                conn.read_chunk(&mut stream)
+            } {
+                Ok(msg) => msg,
+                Err(RtmpError::Io(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::ConnectionReset
+                    || e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    // Normal connection close or timeout
+                    break;
+                }
+                Err(e) => {
+                    println!("Connection {} read error: {}", connection_id, e);
+                    break;
+                }
             };
 
             if let Some(msg) = message {
-                Self::process_client_message(
+                if let Err(e) = Self::process_client_message(
                     connection_id,
                     &mut stream,
                     &connection,
                     &streams,
                     &msg,
-                )?;
+                    &router,
+                    &publishers,
+                ) {
+                    println!("Connection {} message error: {}", connection_id, e);
+                    break;
+                }
             }
         }
 
         // Clean up connection (DashMap - no explicit lock needed)
         connections.remove(&connection_id);
 
+        // Clean up publishers for this connection
+        Self::cleanup_publishers(connection_id, &streams, &publishers);
+
         // Remove from any streams
         Self::cleanup_connection_streams(connection_id, &streams);
 
         println!("Connection {} closed", connection_id);
         Ok(())
+    }
+
+    /// Clean up publishers when connection closes
+    fn cleanup_publishers(
+        connection_id: usize,
+        streams: &DashMap<String, StreamInfo>,
+        publishers: &DashMap<String, StreamPublisher>,
+    ) {
+        // Find all streams published by this connection and remove their publishers
+        for entry in streams.iter() {
+            if entry.publisher_id == connection_id {
+                let stream_name = entry.key().clone();
+                publishers.remove(&stream_name);
+                println!("Removed publisher for stream: {}", stream_name);
+            }
+        }
     }
 
     /// Process message from client
@@ -345,17 +424,19 @@ impl RtmpServer {
         connection: &Arc<Mutex<RtmpConnection>>,
         streams: &DashMap<String, StreamInfo>,
         message: &RtmpMessage,
+        router: &Option<Arc<StreamRouter>>,
+        publishers: &DashMap<String, StreamPublisher>,
     ) -> RtmpResult<()> {
         match message.header.message_type {
             message_type::AMF0_COMMAND => {
                 let command = message.parse_amf0_command()?;
-                Self::handle_command(connection_id, stream, connection, streams, &command)?;
+                Self::handle_command(connection_id, stream, connection, streams, &command, router, publishers)?;
             }
             message_type::AUDIO => {
-                Self::handle_audio_message(connection_id, streams, message)?;
+                Self::handle_audio_message_static(connection_id, streams, message, router, publishers)?;
             }
             message_type::VIDEO => {
-                Self::handle_video_message(connection_id, streams, message)?;
+                Self::handle_video_message_static(connection_id, streams, message, router, publishers)?;
             }
             message_type::AMF0_DATA => {
                 Self::handle_data_message(connection_id, streams, message)?;
@@ -376,6 +457,8 @@ impl RtmpServer {
         connection: &Arc<Mutex<RtmpConnection>>,
         streams: &DashMap<String, StreamInfo>,
         command: &AmfCommand,
+        router: &Option<Arc<StreamRouter>>,
+        publishers: &DashMap<String, StreamPublisher>,
     ) -> RtmpResult<()> {
         let mut conn = connection.lock().unwrap();
 
@@ -405,6 +488,21 @@ impl RtmpServer {
                     // Register stream (DashMap - no explicit lock needed)
                     let stream_info = StreamInfo::new(stream_name.clone(), connection_id);
                     streams.insert(stream_name.clone(), stream_info);
+
+                    // Create StreamPublisher in router if router is configured
+                    if let Some(router) = router {
+                        let stream_id = StreamId::new(stream_name.as_str());
+                        match router.publish(stream_id) {
+                            Ok(publisher) => {
+                                publishers.insert(stream_name.clone(), publisher);
+                                println!("Created StreamPublisher for stream: {}", stream_name);
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to create StreamPublisher for {}: {}", stream_name, e);
+                                // Continue anyway - RTMP will still work even without HLS
+                            }
+                        }
+                    }
 
                     // Send success status
                     conn.send_on_status(
@@ -445,38 +543,152 @@ impl RtmpServer {
         Ok(())
     }
 
-    /// Handle audio message
-    fn handle_audio_message(
+    /// Static handler for audio messages (used in connection threads)
+    fn handle_audio_message_static(
         connection_id: usize,
         streams: &DashMap<String, StreamInfo>,
-        _message: &RtmpMessage,
+        message: &RtmpMessage,
+        _router: &Option<Arc<StreamRouter>>,
+        publishers: &DashMap<String, StreamPublisher>,
     ) -> RtmpResult<()> {
-        // Find stream by publisher ID and broadcast to subscribers
-        for entry in streams.iter() {
-            if entry.publisher_id == connection_id {
-                // TODO: Broadcast audio to subscribers
-                // This requires access to subscriber connections and their TcpStreams
-                break;
-            }
+        // Find stream name by publisher ID
+        let stream_name = Self::get_stream_name_by_publisher_static(connection_id, streams);
+        if stream_name.is_none() {
+            return Ok(());
         }
+        let stream_name = stream_name.unwrap();
+
+        // Get publisher for this stream
+        let publisher = match publishers.get(&stream_name) {
+            Some(p) => p,
+            None => return Ok(()), // No publisher yet, skip
+        };
+
+        // Parse FLV audio tag header
+        let header = match AudioTagHeader::decode(&message.payload) {
+            Some(h) => h,
+            None => return Ok(()), // Invalid header, skip
+        };
+
+        // Determine header length
+        let header_len = if header.aac_packet_type.is_some() { 2 } else { 1 };
+        let frame_data = bytes::Bytes::copy_from_slice(&message.payload[header_len..]);
+
+        // Map sound format to codec
+        let codec = match header.sound_format {
+            crate::protocol::common::SoundFormat::Aac => CodecType::AAC,
+            crate::protocol::common::SoundFormat::Mp3 => CodecType::Mp3,
+            crate::protocol::common::SoundFormat::G711ALaw => CodecType::G711A,
+            crate::protocol::common::SoundFormat::G711MuLaw => CodecType::G711U,
+            _ => return Ok(()), // Unsupported codec, skip
+        };
+
+        let frame_type = if header.is_sequence_header() {
+            AudioFrameType::SequenceHeader
+        } else {
+            AudioFrameType::Raw
+        };
+
+        // Create timestamp from message timestamp
+        let pts = Timestamp::from_millis(message.header.timestamp as u64);
+
+        // Create MediaFrame
+        let frame = MediaFrame::new(
+            2, // Audio track ID
+            pts,
+            FrameType::Audio(frame_type),
+            codec,
+            frame_data,
+        );
+
+        // Publish frame using try_publish (non-blocking)
+        let _ = publisher.try_publish(frame);
+
         Ok(())
     }
 
-    /// Handle video message
-    fn handle_video_message(
+    /// Static handler for video messages (used in connection threads)
+    fn handle_video_message_static(
         connection_id: usize,
         streams: &DashMap<String, StreamInfo>,
-        _message: &RtmpMessage,
+        message: &RtmpMessage,
+        _router: &Option<Arc<StreamRouter>>,
+        publishers: &DashMap<String, StreamPublisher>,
     ) -> RtmpResult<()> {
-        // Find stream by publisher ID and broadcast to subscribers
+        // Find stream name by publisher ID
+        let stream_name = Self::get_stream_name_by_publisher_static(connection_id, streams);
+        if stream_name.is_none() {
+            return Ok(());
+        }
+        let stream_name = stream_name.unwrap();
+
+        // Get publisher for this stream
+        let publisher = match publishers.get(&stream_name) {
+            Some(p) => p,
+            None => return Ok(()), // No publisher yet, skip
+        };
+
+        // Parse FLV video tag header
+        let header = match VideoTagHeader::decode(&message.payload) {
+            Some(h) => h,
+            None => return Ok(()), // Invalid header, skip
+        };
+
+        // Determine header length
+        let header_len = if header.avc_packet_type.is_some() { 5 } else { 1 };
+        let frame_data = bytes::Bytes::copy_from_slice(&message.payload[header_len..]);
+
+        // Map codec ID
+        let codec = match header.codec_id {
+            crate::protocol::common::VideoCodecId::Avc => CodecType::H264,
+            crate::protocol::common::VideoCodecId::Hevc => CodecType::H265,
+            _ => return Ok(()), // Unsupported codec, skip
+        };
+
+        // Map frame type
+        let frame_type = match header.frame_type {
+            crate::protocol::common::VideoFrameType::Keyframe => VideoFrameType::Keyframe,
+            crate::protocol::common::VideoFrameType::Interframe => VideoFrameType::Interframe,
+            crate::protocol::common::VideoFrameType::DisposableInterframe => VideoFrameType::DisposableInterframe,
+            crate::protocol::common::VideoFrameType::GeneratedKeyframe => VideoFrameType::GeneratedKeyframe,
+            _ => VideoFrameType::Interframe,
+        };
+
+        // Calculate timestamps
+        let pts = Timestamp::from_millis(message.header.timestamp as u64);
+        let dts = if header.composition_time >= 0 {
+            pts - std::time::Duration::from_millis(header.composition_time as u64)
+        } else {
+            pts + std::time::Duration::from_millis((-header.composition_time) as u64)
+        };
+
+        // Create MediaFrame with DTS
+        let frame = MediaFrame::with_dts(
+            1, // Video track ID
+            pts,
+            dts,
+            FrameType::Video(frame_type),
+            codec,
+            frame_data,
+        );
+
+        // Publish frame using try_publish (non-blocking)
+        let _ = publisher.try_publish(frame);
+
+        Ok(())
+    }
+
+    /// Get stream name by publisher connection ID (static version)
+    fn get_stream_name_by_publisher_static(
+        connection_id: usize,
+        streams: &DashMap<String, StreamInfo>,
+    ) -> Option<String> {
         for entry in streams.iter() {
             if entry.publisher_id == connection_id {
-                // TODO: Broadcast video to subscribers
-                // This requires access to subscriber connections and their TcpStreams
-                break;
+                return Some(entry.key().clone());
             }
         }
-        Ok(())
+        None
     }
 
     /// Handle data message (metadata)

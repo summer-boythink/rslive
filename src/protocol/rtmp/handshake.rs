@@ -92,6 +92,7 @@ impl RtmpHandshake {
         writer.write_u32::<BigEndian>(self.timestamp)?;
         writer.write_u32::<BigEndian>(0)?; // Zero field
         writer.write_all(&self.random_bytes)?;
+        writer.flush()?;
 
         Ok(())
     }
@@ -121,6 +122,7 @@ impl RtmpHandshake {
     fn send_c2<W: Write>(&self, writer: &mut W) -> RtmpResult<()> {
         if let Some(ref peer_data) = self.peer_data {
             writer.write_all(peer_data)?;
+            writer.flush()?;
         } else {
             return Err(RtmpError::HandshakeFailed(
                 "No peer data available for C2".to_string(),
@@ -169,6 +171,7 @@ impl RtmpHandshake {
         writer.write_u32::<BigEndian>(self.timestamp)?;
         writer.write_u32::<BigEndian>(0)?; // Zero field
         writer.write_all(&self.random_bytes)?;
+        writer.flush()?;
 
         Ok(())
     }
@@ -186,6 +189,7 @@ impl RtmpHandshake {
     fn send_s2<W: Write>(&self, writer: &mut W) -> RtmpResult<()> {
         if let Some(ref peer_data) = self.peer_data {
             writer.write_all(peer_data)?;
+            writer.flush()?;
         } else {
             return Err(RtmpError::HandshakeFailed(
                 "No peer data available for S2".to_string(),

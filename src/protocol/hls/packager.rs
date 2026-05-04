@@ -359,6 +359,86 @@ impl HlsPackagerManager {
         }
         Ok(())
     }
+
+    /// Start auto-subscription to StreamRouter
+    /// This spawns a background task that monitors for new streams and auto-creates packagers
+    pub fn start_auto_subscribe(
+        &self,
+        router: Arc<crate::media::StreamRouter>,
+    ) {
+        let packagers = self.packagers.clone();
+        let config = self.config.clone();
+        let storage = self.storage.clone();
+
+        tokio::spawn(async move {
+            let mut known_streams: std::collections::HashSet<StreamId> = std::collections::HashSet::new();
+
+            loop {
+                // Get current stream IDs from router
+                let current_streams = router.stream_ids();
+
+                // Check for new streams
+                for stream_id in &current_streams {
+                    if !known_streams.contains(stream_id) && !packagers.contains_key(stream_id) {
+                        tracing::info!(stream_id = %stream_id.as_str(), "Auto-creating HLS packager for new stream");
+
+                        // Create packager for this stream
+                        let packager = Arc::new(HlsPackager::new(
+                            stream_id.clone(),
+                            config.clone(),
+                            Arc::clone(&storage),
+                        ));
+                        packagers.insert(stream_id.clone(), Arc::clone(&packager));
+
+                        // Subscribe to stream and forward frames
+                        let stream_id_clone = stream_id.clone();
+                        let packager_clone = Arc::clone(&packager);
+                        let router_clone = Arc::clone(&router);
+
+                        tokio::spawn(async move {
+                            match router_clone.subscribe(&stream_id_clone) {
+                                Ok(subscriber) => {
+                                    tracing::info!(stream_id = %stream_id_clone.as_str(), "Subscribed to stream for HLS packaging");
+
+                                    // Forward frames from subscriber to packager
+                                    loop {
+                                        match subscriber.recv().await {
+                                            Ok(frame) => {
+                                                if let Err(e) = packager_clone.process_frame(frame).await {
+                                                    tracing::warn!(error = %e, "Failed to process frame");
+                                                }
+                                            }
+                                            Err(crate::media::MediaError::ChannelClosed) => {
+                                                tracing::info!(stream_id = %stream_id_clone.as_str(), "Stream closed, stopping HLS packager");
+                                                break;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(error = %e, "Error receiving frame");
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(error = %e, stream_id = %stream_id_clone.as_str(), "Failed to subscribe to stream");
+                                }
+                            }
+                        });
+
+                        known_streams.insert(stream_id.clone());
+                    }
+                }
+
+                // Clean up removed streams
+                known_streams.retain(|id| current_streams.contains(id));
+
+                // Sleep before next check
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        });
+
+        tracing::info!("HLS auto-subscription started");
+    }
 }
 
 #[cfg(test)]

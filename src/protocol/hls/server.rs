@@ -10,6 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info};
 
+// Re-export for CORS
+pub use tower_http::cors::CorsLayer;
+
 /// HLS server configuration
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -80,39 +83,72 @@ impl HlsServer {
         let state = ServerState {
             router: Arc::clone(&self.router),
             packager_manager: Arc::clone(&self.packager_manager),
-            _config: self.config.clone(),
-            _hls_config: self.hls_config.clone(),
+            config: self.config.clone(),
+            hls_config: self.hls_config.clone(),
         };
 
+        let cors_layer = self.create_cors_layer();
+
         axum::Router::new()
-            .route("/hls/:stream/master.m3u8", get(handle_master_playlist))
-            .route("/hls/:stream/index.m3u8", get(handle_media_playlist))
-            .route("/hls/:stream/segment:idx", get(handle_segment))
+            .route("/hls/{stream}/master.m3u8", get(handle_master_playlist))
+            .route("/hls/{stream}/index.m3u8", get(handle_media_playlist))
+            .route("/hls/{stream}/segment/{idx}", get(handle_segment))
             .route("/health", get(health_check))
+            .layer(cors_layer)
             .with_state(state)
+    }
+
+    /// Create CORS middleware layer
+    fn create_cors_layer(&self) -> tower_http::cors::CorsLayer {
+        use tower_http::cors::{Any, CorsLayer};
+
+        let cors = if let Some(ref origin) = self.config.cors_origin {
+            if origin == "*" {
+                CorsLayer::new()
+                    .allow_origin(Any)
+                    .allow_methods([http::Method::GET, http::Method::OPTIONS])
+                    .allow_headers(Any)
+                    .max_age(Duration::from_secs(86400))
+            } else {
+                CorsLayer::new()
+                    .allow_origin(tower_http::cors::AllowOrigin::exact(
+                        origin.parse().expect("Invalid CORS origin")
+                    ))
+                    .allow_methods([http::Method::GET, http::Method::OPTIONS])
+                    .allow_headers(Any)
+                    .max_age(Duration::from_secs(86400))
+            }
+        } else {
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([http::Method::GET, http::Method::OPTIONS])
+                .allow_headers(Any)
+        };
+
+        cors
     }
 }
 
 /// Server state
 #[derive(Clone)]
+#[allow(dead_code)]
 struct ServerState {
     router: Arc<StreamRouter>,
     packager_manager: Arc<HlsPackagerManager>,
-    _config: ServerConfig,
-    _hls_config: HlsConfig,
+    config: ServerConfig,
+    hls_config: HlsConfig,
 }
 
 /// Handle master playlist request
 async fn handle_master_playlist(
-    axum::extract::State(state): axum::extract::State<ServerState>,
+    axum::extract::State(_state): axum::extract::State<ServerState>,
     axum::extract::Path(stream_name): axum::extract::Path<String>,
 ) -> axum::response::Response {
-    let stream_id = StreamId::new(stream_name.clone());
+    let _stream_id = StreamId::new(stream_name.clone());
 
-    // Check if stream exists
-    if !state.router.has_stream(&stream_id) {
-        return not_found(format!("Stream '{}' not found", stream_name));
-    }
+    // Note: In current architecture, RTMP server and StreamRouter are separate.
+    // We return the master playlist regardless of stream existence,
+    // allowing players to poll until segments are available.
 
     // Generate master playlist
     let mut master = MasterPlaylist::new();
@@ -140,11 +176,24 @@ async fn handle_media_playlist(
 ) -> axum::response::Response {
     let stream_id = StreamId::new(stream_name.clone());
 
-    // Get or create packager for stream
-    let packager = state
-        .packager_manager
-        .get_packager(&stream_id)
-        .unwrap_or_else(|| state.packager_manager.create_packager(stream_id));
+    // Check if packager exists
+    let packager = match state.packager_manager.get_packager(&stream_id) {
+        Some(p) => p,
+        None => {
+            // Stream not publishing yet
+            return axum::response::Response::builder()
+                .status(404)
+                .header("Content-Type", "text/plain")
+                .header("Cache-Control", "no-cache")
+                .body(axum::body::Body::from(format!(
+                    "Stream '{}' not found. Start streaming with:\n\nffmpeg -re -i input.mp4 -c:v libx264 -c:a aac -f flv rtmp://{}/live/{}",
+                    stream_name,
+                    state.config.bind_addr,
+                    stream_name
+                )))
+                .unwrap();
+        }
+    };
 
     // Get playlist
     let playlist = packager.playlist_string().await;

@@ -119,6 +119,7 @@ impl StreamState {
 }
 
 /// Handle for publishing to a stream
+#[derive(Clone)]
 pub struct StreamPublisher {
     stream_id: StreamId,
     streams: Arc<DashMap<StreamId, StreamState>>,
