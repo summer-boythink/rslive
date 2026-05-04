@@ -1,4 +1,5 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use bytes::Bytes;
 use std::collections::HashMap;
 
 use crate::protocol::amf0::Amf0Value;
@@ -39,19 +40,27 @@ impl RtmpMessageHeader {
 pub struct RtmpMessage {
     /// Message header
     pub header: RtmpMessageHeader,
-    /// Message payload
-    pub payload: Vec<u8>,
+    /// Message payload (Bytes for zero-copy cloning)
+    pub payload: Bytes,
 }
 
 impl RtmpMessage {
-    pub fn new(header: RtmpMessageHeader, payload: Vec<u8>) -> Self {
+    pub fn new(header: RtmpMessageHeader, payload: Bytes) -> Self {
         Self { header, payload }
+    }
+
+    /// Create from Vec (convenience method)
+    pub fn from_vec(header: RtmpMessageHeader, payload: Vec<u8>) -> Self {
+        Self {
+            header,
+            payload: Bytes::from(payload),
+        }
     }
 
     /// Create a control message
     pub fn create_control_message(message_type: u8, timestamp: u32, data: Vec<u8>) -> Self {
         let header = RtmpMessageHeader::new(message_type, data.len() as u32, timestamp, 0);
-        Self::new(header, data)
+        Self::from_vec(header, data)
     }
 
     /// Create a command message using AMF0
@@ -97,7 +106,7 @@ impl RtmpMessage {
             stream_id,
         );
 
-        Ok(Self::new(header, payload))
+        Ok(Self::from_vec(header, payload))
     }
 
     /// Parse AMF0 command message
@@ -180,7 +189,7 @@ impl RtmpMessage {
             stream_id,
         );
 
-        Ok(Self::new(header, payload))
+        Ok(Self::from_vec(header, payload))
     }
 
     /// Create audio message
@@ -191,7 +200,7 @@ impl RtmpMessage {
             timestamp,
             stream_id,
         );
-        Self::new(header, audio_data)
+        Self::from_vec(header, audio_data)
     }
 
     /// Create video message
@@ -202,7 +211,7 @@ impl RtmpMessage {
             timestamp,
             stream_id,
         );
-        Self::new(header, video_data)
+        Self::from_vec(header, video_data)
     }
 }
 

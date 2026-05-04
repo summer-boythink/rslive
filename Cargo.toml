@@ -84,3 +84,7 @@ pretty_assertions = "1.4"
 name = "rslive-server"
 path = "src/bin/server.rs"
 
+[[bench]]
+name = "protocol_bench"
+harness = false
+

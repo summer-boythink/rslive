@@ -1,10 +1,15 @@
 use std::{
     collections::HashMap,
     net::{SocketAddr, TcpListener, TcpStream},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::Duration,
 };
+
+use dashmap::DashMap;
 
 use super::{
     RtmpConfig, RtmpError, RtmpResult,
@@ -20,16 +25,16 @@ pub struct RtmpServer {
     config: RtmpConfig,
     /// Server listening address
     listen_addr: Option<SocketAddr>,
-    /// Active connections
-    connections: Arc<Mutex<HashMap<usize, Arc<Mutex<RtmpConnection>>>>>,
-    /// Connection counter
-    next_connection_id: Arc<Mutex<usize>>,
-    /// Server running state
-    is_running: Arc<Mutex<bool>>,
+    /// Active connections (using DashMap for better concurrency)
+    connections: DashMap<usize, Arc<Mutex<RtmpConnection>>>,
+    /// Connection counter (using atomic for lock-free increment)
+    next_connection_id: AtomicUsize,
+    /// Server running state (using atomic for lock-free check)
+    is_running: AtomicBool,
     /// Event handlers
     event_handlers: EventHandlers,
-    /// Active streams (stream_name -> publisher_connection_id)
-    streams: Arc<Mutex<HashMap<String, StreamInfo>>>,
+    /// Active streams (stream_name -> StreamInfo)
+    streams: DashMap<String, StreamInfo>,
 }
 
 /// Stream information on the server
@@ -85,11 +90,11 @@ impl RtmpServer {
         Self {
             config,
             listen_addr: None,
-            connections: Arc::new(Mutex::new(HashMap::new())),
-            next_connection_id: Arc::new(Mutex::new(0)),
-            is_running: Arc::new(Mutex::new(false)),
+            connections: DashMap::new(),
+            next_connection_id: AtomicUsize::new(0),
+            is_running: AtomicBool::new(false),
             event_handlers: EventHandlers::default(),
-            streams: Arc::new(Mutex::new(HashMap::new())),
+            streams: DashMap::new(),
         }
     }
 
@@ -167,13 +172,13 @@ impl RtmpServer {
             .map_err(|e| RtmpError::ConnectionFailed(format!("Failed to bind: {}", e)))?;
 
         self.listen_addr = Some(listener.local_addr()?);
-        *self.is_running.lock().unwrap() = true;
+        self.is_running.store(true, Ordering::SeqCst);
 
         println!("RTMP Server listening on {}", addr);
 
         // Accept connections
         for stream in listener.incoming() {
-            if !*self.is_running.lock().unwrap() {
+            if !self.is_running.load(Ordering::SeqCst) {
                 break;
             }
 
@@ -182,23 +187,20 @@ impl RtmpServer {
                     let connection_id = self.get_next_connection_id();
                     let connection = Arc::new(Mutex::new(RtmpConnection::new(self.config.clone())));
 
-                    // Store connection
-                    self.connections
-                        .lock()
-                        .unwrap()
-                        .insert(connection_id, connection.clone());
+                    // Store connection (DashMap - no explicit lock needed)
+                    self.connections.insert(connection_id, connection.clone());
 
-                    // Spawn handler thread
-                    let connections_clone = self.connections.clone();
-                    let streams_clone = self.streams.clone();
+                    // Clone references for the spawned thread
+                    let connections = self.connections.clone();
+                    let streams = self.streams.clone();
 
                     thread::spawn(move || {
                         if let Err(e) = Self::handle_client_connection(
                             connection_id,
                             tcp_stream,
                             connection,
-                            connections_clone,
-                            streams_clone,
+                            connections,
+                            streams,
                         ) {
                             eprintln!("Connection {} error: {}", connection_id, e);
                         }
@@ -215,30 +217,25 @@ impl RtmpServer {
 
     /// Stop the server
     pub fn stop(&mut self) {
-        *self.is_running.lock().unwrap() = false;
+        self.is_running.store(false, Ordering::SeqCst);
 
-        // Close all connections
-        let mut connections = self.connections.lock().unwrap();
-        connections.clear();
+        // Close all connections (DashMap - no explicit lock needed)
+        self.connections.clear();
 
         // Clear all streams
-        let mut streams = self.streams.lock().unwrap();
-        streams.clear();
+        self.streams.clear();
     }
 
     /// Check if server is running
     pub fn is_running(&self) -> bool {
-        *self.is_running.lock().unwrap()
+        self.is_running.load(Ordering::SeqCst)
     }
 
     /// Get server statistics
     pub fn get_stats(&self) -> ServerStats {
-        let connections = self.connections.lock().unwrap();
-        let streams = self.streams.lock().unwrap();
-
         ServerStats {
-            connection_count: connections.len(),
-            stream_count: streams.len(),
+            connection_count: self.connections.len(),
+            stream_count: self.streams.len(),
             is_running: self.is_running(),
             listen_addr: self.listen_addr,
         }
@@ -246,10 +243,10 @@ impl RtmpServer {
 
     /// Get all active connections
     pub fn get_connections(&self) -> Vec<(usize, ConnectionStats)> {
-        let connections = self.connections.lock().unwrap();
         let mut result = Vec::new();
 
-        for (id, connection) in connections.iter() {
+        for entry in self.connections.iter() {
+            let (id, connection) = entry.pair();
             if let Ok(conn) = connection.try_lock() {
                 result.push((*id, conn.get_stats()));
             }
@@ -260,18 +257,14 @@ impl RtmpServer {
 
     /// Get all active streams
     pub fn get_streams(&self) -> Vec<StreamInfo> {
-        let streams = self.streams.lock().unwrap();
-        streams.values().cloned().collect()
+        self.streams.iter().map(|entry| entry.value().clone()).collect()
     }
 
     /// Broadcast message to all subscribers of a stream
     pub fn broadcast_to_stream(&self, stream_name: &str, _message: &RtmpMessage) -> RtmpResult<()> {
-        let streams = self.streams.lock().unwrap();
-        let connections = self.connections.lock().unwrap();
-
-        if let Some(stream_info) = streams.get(stream_name) {
+        if let Some(stream_info) = self.streams.get(stream_name) {
             for &subscriber_id in &stream_info.subscribers {
-                if let Some(connection) = connections.get(&subscriber_id) {
+                if let Some(connection) = self.connections.get(&subscriber_id) {
                     if let Ok(_conn) = connection.try_lock() {
                         // This would need access to the TcpStream, which requires refactoring
                         // For now, we'll leave this as a placeholder
@@ -283,12 +276,9 @@ impl RtmpServer {
         Ok(())
     }
 
-    /// Get next connection ID
+    /// Get next connection ID (lock-free using atomic)
     fn get_next_connection_id(&self) -> usize {
-        let mut counter = self.next_connection_id.lock().unwrap();
-        let id = *counter;
-        *counter += 1;
-        id
+        self.next_connection_id.fetch_add(1, Ordering::SeqCst)
     }
 
     /// Handle individual client connection
@@ -296,8 +286,8 @@ impl RtmpServer {
         connection_id: usize,
         mut stream: TcpStream,
         connection: Arc<Mutex<RtmpConnection>>,
-        connections: Arc<Mutex<HashMap<usize, Arc<Mutex<RtmpConnection>>>>>,
-        streams: Arc<Mutex<HashMap<String, StreamInfo>>>,
+        connections: DashMap<usize, Arc<Mutex<RtmpConnection>>>,
+        streams: DashMap<String, StreamInfo>,
     ) -> RtmpResult<()> {
         println!("New connection: {}", connection_id);
 
@@ -335,11 +325,8 @@ impl RtmpServer {
             }
         }
 
-        // Clean up connection
-        {
-            let mut conns = connections.lock().unwrap();
-            conns.remove(&connection_id);
-        }
+        // Clean up connection (DashMap - no explicit lock needed)
+        connections.remove(&connection_id);
 
         // Remove from any streams
         Self::cleanup_connection_streams(connection_id, &streams);
@@ -353,7 +340,7 @@ impl RtmpServer {
         connection_id: usize,
         stream: &mut TcpStream,
         connection: &Arc<Mutex<RtmpConnection>>,
-        streams: &Arc<Mutex<HashMap<String, StreamInfo>>>,
+        streams: &DashMap<String, StreamInfo>,
         message: &RtmpMessage,
     ) -> RtmpResult<()> {
         match message.header.message_type {
@@ -384,7 +371,7 @@ impl RtmpServer {
         connection_id: usize,
         stream: &mut TcpStream,
         connection: &Arc<Mutex<RtmpConnection>>,
-        streams: &Arc<Mutex<HashMap<String, StreamInfo>>>,
+        streams: &DashMap<String, StreamInfo>,
         command: &AmfCommand,
     ) -> RtmpResult<()> {
         let mut conn = connection.lock().unwrap();
@@ -412,12 +399,9 @@ impl RtmpServer {
             }
             "publish" => {
                 if let Some(Amf0Value::String(stream_name)) = command.arguments.first() {
-                    // Register stream
-                    {
-                        let mut streams_guard = streams.lock().unwrap();
-                        let stream_info = StreamInfo::new(stream_name.clone(), connection_id);
-                        streams_guard.insert(stream_name.clone(), stream_info);
-                    }
+                    // Register stream (DashMap - no explicit lock needed)
+                    let stream_info = StreamInfo::new(stream_name.clone(), connection_id);
+                    streams.insert(stream_name.clone(), stream_info);
 
                     // Send success status
                     conn.send_on_status(
@@ -433,12 +417,9 @@ impl RtmpServer {
             }
             "play" => {
                 if let Some(Amf0Value::String(stream_name)) = command.arguments.first() {
-                    // Add as subscriber
-                    {
-                        let mut streams_guard = streams.lock().unwrap();
-                        if let Some(stream_info) = streams_guard.get_mut(stream_name) {
-                            stream_info.subscribers.push(connection_id);
-                        }
+                    // Add as subscriber (DashMap - fine-grained locking)
+                    if let Some(mut stream_info) = streams.get_mut(stream_name) {
+                        stream_info.subscribers.push(connection_id);
                     }
 
                     // Send success status
@@ -464,13 +445,12 @@ impl RtmpServer {
     /// Handle audio message
     fn handle_audio_message(
         connection_id: usize,
-        streams: &Arc<Mutex<HashMap<String, StreamInfo>>>,
+        streams: &DashMap<String, StreamInfo>,
         _message: &RtmpMessage,
     ) -> RtmpResult<()> {
         // Find stream by publisher ID and broadcast to subscribers
-        let streams_guard = streams.lock().unwrap();
-        for (_stream_name, stream_info) in streams_guard.iter() {
-            if stream_info.publisher_id == connection_id {
+        for entry in streams.iter() {
+            if entry.publisher_id == connection_id {
                 // TODO: Broadcast audio to subscribers
                 // This requires access to subscriber connections and their TcpStreams
                 break;
@@ -482,13 +462,12 @@ impl RtmpServer {
     /// Handle video message
     fn handle_video_message(
         connection_id: usize,
-        streams: &Arc<Mutex<HashMap<String, StreamInfo>>>,
+        streams: &DashMap<String, StreamInfo>,
         _message: &RtmpMessage,
     ) -> RtmpResult<()> {
         // Find stream by publisher ID and broadcast to subscribers
-        let streams_guard = streams.lock().unwrap();
-        for (_stream_name, stream_info) in streams_guard.iter() {
-            if stream_info.publisher_id == connection_id {
+        for entry in streams.iter() {
+            if entry.publisher_id == connection_id {
                 // TODO: Broadcast video to subscribers
                 // This requires access to subscriber connections and their TcpStreams
                 break;
@@ -500,14 +479,13 @@ impl RtmpServer {
     /// Handle data message (metadata)
     fn handle_data_message(
         connection_id: usize,
-        streams: &Arc<Mutex<HashMap<String, StreamInfo>>>,
+        streams: &DashMap<String, StreamInfo>,
         _message: &RtmpMessage,
     ) -> RtmpResult<()> {
         // Parse metadata if it's onMetaData
         // This is simplified - real implementation would parse AMF data
-        let mut streams_guard = streams.lock().unwrap();
-        for (_stream_name, stream_info) in streams_guard.iter_mut() {
-            if stream_info.publisher_id == connection_id {
+        for entry in streams.iter_mut() {
+            if entry.publisher_id == connection_id {
                 // TODO: Parse and store metadata
                 break;
             }
@@ -518,23 +496,22 @@ impl RtmpServer {
     /// Clean up connection from all streams
     fn cleanup_connection_streams(
         connection_id: usize,
-        streams: &Arc<Mutex<HashMap<String, StreamInfo>>>,
+        streams: &DashMap<String, StreamInfo>,
     ) {
-        let mut streams_guard = streams.lock().unwrap();
         let mut to_remove = Vec::new();
 
-        for (stream_name, stream_info) in streams_guard.iter_mut() {
-            if stream_info.publisher_id == connection_id {
+        for mut entry in streams.iter_mut() {
+            if entry.publisher_id == connection_id {
                 // Remove publisher stream
-                to_remove.push(stream_name.clone());
+                to_remove.push(entry.key().clone());
             } else {
                 // Remove from subscribers
-                stream_info.subscribers.retain(|&id| id != connection_id);
+                entry.subscribers.retain(|&id| id != connection_id);
             }
         }
 
         for stream_name in to_remove {
-            streams_guard.remove(&stream_name);
+            streams.remove(&stream_name);
         }
     }
 }
@@ -600,5 +577,48 @@ mod tests {
         assert!(stream_info.subscribers.is_empty());
         assert!(stream_info.is_live);
         assert!(stream_info.metadata.is_none());
+    }
+
+    #[test]
+    fn test_dashmap_concurrent_access() {
+        let server = RtmpServer::with_defaults();
+
+        // Test concurrent insert and read
+        let conn_id = 1;
+        let connection = Arc::new(Mutex::new(RtmpConnection::new(RtmpConfig::default())));
+        server.connections.insert(conn_id, connection);
+
+        assert_eq!(server.connections.len(), 1);
+        assert!(server.connections.contains_key(&conn_id));
+
+        server.connections.remove(&conn_id);
+        assert_eq!(server.connections.len(), 0);
+    }
+
+    #[test]
+    fn test_atomic_counter() {
+        let server = RtmpServer::with_defaults();
+
+        // Test atomic increment
+        let id1 = server.get_next_connection_id();
+        let id2 = server.get_next_connection_id();
+        let id3 = server.get_next_connection_id();
+
+        assert_eq!(id1, 0);
+        assert_eq!(id2, 1);
+        assert_eq!(id3, 2);
+    }
+
+    #[test]
+    fn test_atomic_running_state() {
+        let mut server = RtmpServer::with_defaults();
+
+        assert!(!server.is_running());
+
+        server.is_running.store(true, Ordering::SeqCst);
+        assert!(server.is_running());
+
+        server.stop();
+        assert!(!server.is_running());
     }
 }

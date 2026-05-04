@@ -1,4 +1,5 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use bytes::Bytes;
 use std::{
     collections::HashMap,
     io::{self, Read, Write},
@@ -75,13 +76,21 @@ impl RtmpChunkHeader {
 pub struct RtmpChunk {
     /// Chunk header
     pub header: RtmpChunkHeader,
-    /// Chunk data
-    pub data: Vec<u8>,
+    /// Chunk data (Bytes for zero-copy cloning)
+    pub data: Bytes,
 }
 
 impl RtmpChunk {
-    pub fn new(header: RtmpChunkHeader, data: Vec<u8>) -> Self {
+    pub fn new(header: RtmpChunkHeader, data: Bytes) -> Self {
         Self { header, data }
+    }
+
+    /// Create from Vec (convenience method that copies)
+    pub fn from_vec(header: RtmpChunkHeader, data: Vec<u8>) -> Self {
+        Self {
+            header,
+            data: Bytes::from(data),
+        }
     }
 }
 
@@ -425,7 +434,7 @@ impl RtmpChunkHandler {
 
         Ok(RtmpChunk {
             header: chunk_header,
-            data,
+            data: Bytes::from(data),
         })
     }
 
@@ -518,7 +527,7 @@ impl RtmpChunkHandler {
         if state.partial_message.len() >= state.expected_length as usize {
             // Message is complete
             let header = state.last_header.as_ref().unwrap().clone();
-            let payload = state.partial_message.clone();
+            let payload = Bytes::from(state.partial_message.clone());
             state.clear();
 
             Ok(Some(RtmpMessage::new(header, payload)))
@@ -559,7 +568,7 @@ impl RtmpChunkHandler {
                 message.header.message_stream_id,
             );
 
-            let chunk_data = payload[offset..offset + chunk_data_size].to_vec();
+            let chunk_data = payload.slice(offset..offset + chunk_data_size);
             chunks.push(RtmpChunk::new(chunk_header, chunk_data));
 
             offset += chunk_data_size;
@@ -649,7 +658,7 @@ mod tests {
     fn test_chunk_creation() {
         let handler = RtmpChunkHandler::new(128);
         let header = RtmpMessageHeader::new(8, 1000, 12345, 1); // Audio message
-        let payload = vec![0xAF; 1000]; // 1000 bytes of audio data
+        let payload = Bytes::from(vec![0xAF; 1000]); // 1000 bytes of audio data
         let message = RtmpMessage::new(header, payload);
 
         let chunks = handler.create_chunks(&message, 4, 128);

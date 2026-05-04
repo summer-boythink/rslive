@@ -28,9 +28,11 @@
 
 pub mod media;
 pub mod protocol;
+pub mod utils;
 
 // Re-export for convenience
 pub use media::{CodecType, MediaFrame, RouterConfig, StreamRouter, Timestamp};
+pub use utils::BufferPool;
 
 // Protocol re-exports
 pub mod rtmp {
