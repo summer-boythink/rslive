@@ -13,12 +13,14 @@ use crate::media::{CodecType, MediaFrame, Timestamp};
 use bytes::Bytes;
 use std::time::Duration;
 
+pub mod fmp4;
 pub mod m3u8;
 pub mod mpegts;
 pub mod packager;
 pub mod segment;
 pub mod server;
 
+pub use fmp4::{Fmp4Muxer, Fmp4MuxerConfig, Fmp4MuxerError};
 pub use m3u8::{MasterPlaylist, MediaPlaylist, PlaylistType};
 pub use packager::{HlsPackager, HlsPackagerManager, PackagerConfig};
 pub use segment::{MemorySegmentStorage, Segment, SegmentFormat, SegmentInfo};

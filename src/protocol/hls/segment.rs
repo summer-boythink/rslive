@@ -179,13 +179,98 @@ fn encode_ts_segment(frames: &[MediaFrame]) -> HlsResult<Bytes> {
 }
 
 /// Encode frames to fMP4 segment
-fn encode_fmp4_segment(_frames: &[MediaFrame]) -> HlsResult<Bytes> {
-    // TODO: Implement fMP4 muxer
-    // This is a placeholder - real implementation would:
-    // 1. Create moof (movie fragment) box
-    // 2. Create mdat box with sample data
-    // 3. Handle sample tables and durations
-    Err(HlsError::Fmp4("fMP4 muxer not yet implemented".into()))
+fn encode_fmp4_segment(frames: &[MediaFrame]) -> HlsResult<Bytes> {
+    if frames.is_empty() {
+        return Err(HlsError::InvalidData("No frames to encode".into()));
+    }
+
+    use super::fmp4::{Fmp4Muxer, Fmp4MuxerConfig, Sample, VIDEO_TRACK_ID, AUDIO_TRACK_ID};
+
+    // Detect codecs and track info from frames
+    let video_frame = frames.iter().find(|f| f.is_video());
+    let audio_frame = frames.iter().find(|f| f.is_audio());
+
+    // Create muxer config with default timescale (1000 = milliseconds)
+    let config = Fmp4MuxerConfig::default();
+    let mut muxer = Fmp4Muxer::new(config);
+
+    // Add video track if present
+    if let Some(vf) = video_frame {
+        let (width, height) = extract_video_dimensions(vf);
+        muxer
+            .add_video_track(VIDEO_TRACK_ID, vf.codec, width, height)
+            .map_err(|e| HlsError::Fmp4(format!("Failed to add video track: {}", e)))?;
+    }
+
+    // Add audio track if present
+    if let Some(af) = audio_frame {
+        let (sample_rate, channels) = extract_audio_info(af);
+        muxer
+            .add_audio_track(AUDIO_TRACK_ID, af.codec, sample_rate, channels)
+            .map_err(|e| HlsError::Fmp4(format!("Failed to add audio track: {}", e)))?;
+    }
+
+    // Convert frames to samples and add to muxer
+    let mut samples = Vec::new();
+    for (i, frame) in frames.iter().enumerate() {
+        let track_id = if frame.is_video() {
+            VIDEO_TRACK_ID
+        } else {
+            AUDIO_TRACK_ID
+        };
+
+        // Calculate duration (use next frame's pts - current pts, or estimate for last frame)
+        let duration = if i + 1 < frames.len() {
+            let next_frame = &frames[i + 1];
+            let diff_ms = next_frame.pts.as_millis() - frame.pts.as_millis();
+            diff_ms as u32
+        } else {
+            // For the last frame, use a default duration based on frame type
+            if frame.is_video() {
+                40 // Default 40ms for video (25fps)
+            } else {
+                21 // Default ~21ms for audio (48kHz, 1024 samples)
+            }
+        };
+
+        // Calculate composition time offset (pts - dts)
+        let composition_time_offset =
+            (frame.pts.as_millis() as i64 - frame.dts.as_millis() as i64) as i32;
+
+        let sample = Sample {
+            track_id,
+            data: (*frame.data).clone().to_vec(),
+            duration,
+            composition_time_offset,
+            is_sync: frame.is_keyframe(),
+        };
+        samples.push(sample);
+    }
+
+    // Add samples to muxer and create segment
+    muxer
+        .add_samples(samples)
+        .map_err(|e| HlsError::Fmp4(format!("Failed to add samples: {}", e)))?;
+
+    let segment = muxer
+        .flush_media_segment()
+        .map_err(|e| HlsError::Fmp4(format!("Failed to flush segment: {}", e)))?;
+
+    Ok(Bytes::from(segment))
+}
+
+/// Extract video dimensions from frame (placeholder - real implementation would parse SPS)
+fn extract_video_dimensions(_frame: &MediaFrame) -> (u16, u16) {
+    // Default to 1920x1080 if not known
+    // Real implementation would parse SPS NAL unit for H.264/H.265
+    (1920, 1080)
+}
+
+/// Extract audio info from frame (placeholder - real implementation would parse AudioSpecificConfig)
+fn extract_audio_info(_frame: &MediaFrame) -> (u32, u8) {
+    // Default to 48kHz stereo
+    // Real implementation would parse AudioSpecificConfig for AAC
+    (48000, 2)
 }
 
 /// Segment storage interface
