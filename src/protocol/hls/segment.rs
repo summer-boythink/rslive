@@ -1,6 +1,10 @@
 //! HLS segment management
+//!
+//! This module handles the creation and storage of HLS segments.
+//! It supports both MPEG-TS and fMP4 formats.
 
 use super::{HlsError, HlsResult};
+use super::mpegts::{TsMuxer, TsMuxerConfig};
 use crate::media::{CodecType, MediaFrame, Timestamp};
 use bytes::Bytes;
 use std::sync::Arc;
@@ -151,155 +155,37 @@ impl Segment {
 
 /// Encode frames to MPEG-TS segment
 fn encode_ts_segment(frames: &[MediaFrame]) -> HlsResult<Bytes> {
-    // This is a placeholder - real implementation would:
-    // 1. Create PAT (Program Association Table)
-    // 2. Create PMT (Program Map Table)
-    // 3. Create PCR (Program Clock Reference)
-    // 4. Encapsulate video frames in PES packets
-    // 5. Encapsulate audio frames in PES packets
-    // 6. Generate adaptation fields
-
-    // For now, return a placeholder
-    // TODO: Implement full MPEG-TS muxer
-    let mut output = Vec::new();
-
-    // Write PAT
-    output.extend_from_slice(&create_pat());
-
-    // Write PMT
-    output.extend_from_slice(&create_pmt());
-
-    // Write video/audio PES packets
-    for frame in frames {
-        let pes_packet = frame_to_pes_packet(frame)?;
-        output.extend_from_slice(&pes_packet);
+    if frames.is_empty() {
+        return Err(HlsError::InvalidData("No frames to encode".into()));
     }
 
-    Ok(Bytes::from(output))
+    // Detect codecs from frames
+    let video_codec = frames.iter()
+        .find(|f| f.is_video())
+        .map(|f| f.codec);
+
+    let audio_codec = frames.iter()
+        .find(|f| f.is_audio())
+        .map(|f| f.codec);
+
+    // Create muxer config
+    let mut config = TsMuxerConfig::default();
+    config.video_codec = video_codec;
+    config.audio_codec = audio_codec;
+
+    // Create muxer and generate segment
+    let mut muxer = TsMuxer::new(config);
+    Ok(muxer.create_segment(frames))
 }
 
 /// Encode frames to fMP4 segment
 fn encode_fmp4_segment(_frames: &[MediaFrame]) -> HlsResult<Bytes> {
+    // TODO: Implement fMP4 muxer
     // This is a placeholder - real implementation would:
     // 1. Create moof (movie fragment) box
     // 2. Create mdat box with sample data
     // 3. Handle sample tables and durations
-
-    // TODO: Implement fMP4 muxer
-    Ok(Bytes::new())
-}
-
-/// Create PAT (Program Association Table)
-fn create_pat() -> Bytes {
-    // Simplified PAT
-    // Real implementation needs proper section syntax
-    let mut pat = vec![
-        0x47, // Sync byte
-        0x40, 0x00, // PID 0x0000
-        0x10, // Payload start + continuity
-    ];
-
-    // PAT payload
-    pat.extend_from_slice(&[
-        0x00, // Pointer field
-        0x00, // Table ID (PAT)
-        0xB0, 0x0D, // Section length
-        0x00, 0x01, // Transport stream ID
-        0xC1, // Version + current_next
-        0x00, 0x00, // Section number / last section number
-        // Program 1 -> PMT PID 0x100
-        0x00, 0x01, 0xF0, 0x00, // CRC32 (placeholder)
-        0x00, 0x00, 0x00, 0x00,
-    ]);
-
-    Bytes::from(pat)
-}
-
-/// Create PMT (Program Map Table)
-fn create_pmt() -> Bytes {
-    // Simplified PMT
-    let mut pmt = vec![
-        0x47, // Sync byte
-        0x41, 0x00, // PID 0x0100
-        0x10, // Payload start + continuity
-    ];
-
-    // PMT payload
-    pmt.extend_from_slice(&[
-        0x00, // Pointer field
-        0x02, // Table ID (PMT)
-        0xB0, 0x17, // Section length
-        0x00, 0x01, // Program number
-        0xC1, // Version + current_next
-        0x00, 0x00, // Section number / last section number
-        0xF0, 0x00, // PCR PID
-        0xF0, 0x00, // Program info length
-        // Video stream (H.264)
-        0x1B, // Stream type (H.264)
-        0xE1, 0x00, // Elementary PID
-        0xF0, 0x00, // ES info length
-        // Audio stream (AAC)
-        0x0F, // Stream type (AAC)
-        0xE1, 0x01, // Elementary PID
-        0xF0, 0x00, // ES info length
-        // CRC32 (placeholder)
-        0x00, 0x00, 0x00, 0x00,
-    ]);
-
-    Bytes::from(pmt)
-}
-
-/// Convert frame to PES packet
-fn frame_to_pes_packet(frame: &MediaFrame) -> HlsResult<Bytes> {
-    let mut packet = Vec::new();
-
-    // PES packet start code
-    packet.extend_from_slice(&[0x00, 0x00, 0x01]);
-
-    // Stream ID
-    let stream_id = if frame.is_video() {
-        0xE0 // Video stream 0
-    } else {
-        0xC0 // Audio stream 0
-    };
-    packet.push(stream_id);
-
-    // PES packet length (will be filled later)
-    let length_pos = packet.len();
-    packet.push(0x00);
-    packet.push(0x00);
-
-    // Flags
-    packet.push(0x80); // PTS present
-    packet.push(0x80);
-
-    // Header data length
-    packet.push(0x05);
-
-    // PTS (33 bits in 5 bytes)
-    let pts_90khz = frame.pts.as_nanos() * 90_000 / 1_000_000_000;
-    write_pts(&mut packet, pts_90khz as u64, 0x20);
-
-    // Fill packet length
-    let data_length = frame.size() + 5; // +5 for header
-    packet[length_pos] = ((data_length >> 8) & 0xFF) as u8;
-    packet[length_pos + 1] = (data_length & 0xFF) as u8;
-
-    // Frame data
-    packet.extend_from_slice(&frame.data);
-
-    Ok(Bytes::from(packet))
-}
-
-/// Write PTS/DTS to buffer
-fn write_pts(buf: &mut Vec<u8>, pts: u64, prefix: u8) {
-    let pts_33 = pts & 0x1FFFFFFFF;
-
-    buf.push(prefix | ((pts_33 >> 29) as u8 & 0x0E) | 0x01);
-    buf.push((pts_33 >> 22) as u8 & 0xFF);
-    buf.push(((pts_33 >> 14) as u8 & 0xFE) | 0x01);
-    buf.push((pts_33 >> 7) as u8 & 0xFF);
-    buf.push(((pts_33 << 1) as u8 & 0xFE) | 0x01);
+    Err(HlsError::Fmp4("fMP4 muxer not yet implemented".into()))
 }
 
 /// Segment storage interface

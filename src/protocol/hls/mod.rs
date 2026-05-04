@@ -14,6 +14,7 @@ use bytes::Bytes;
 use std::time::Duration;
 
 pub mod m3u8;
+pub mod mpegts;
 pub mod packager;
 pub mod segment;
 pub mod server;
