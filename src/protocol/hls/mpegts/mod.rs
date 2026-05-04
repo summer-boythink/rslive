@@ -27,17 +27,17 @@
 //! - **PES**: Packetized Elementary Stream, encapsulates audio/video data
 //! - **PCR**: Program Clock Reference, for synchronization
 
-mod ts_packet;
-mod pat;
-mod pmt;
-mod pes;
 mod muxer;
+mod pat;
+mod pes;
+mod pmt;
+mod ts_packet;
 
-pub use ts_packet::{TsPacket, TsPacketHeader, AdaptationField, PcrValue, ContinuityCounter};
-pub use pat::PatGenerator;
-pub use pmt::{PmtGenerator, StreamInfo, StreamType};
-pub use pes::PesEncoder;
 pub use muxer::{TsMuxer, TsMuxerConfig, TsMuxerError, TsSegmentInfo, create_ts_segment};
+pub use pat::PatGenerator;
+pub use pes::PesEncoder;
+pub use pmt::{PmtGenerator, StreamInfo, StreamType};
+pub use ts_packet::{AdaptationField, ContinuityCounter, PcrValue, TsPacket, TsPacketHeader};
 
 /// TS packet size in bytes (fixed by specification)
 pub const TS_PACKET_SIZE: usize = 188;

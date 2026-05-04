@@ -35,9 +35,9 @@
 //! └──────────────────────────────────────────────────────────────┘
 //! ```
 
+use super::nanos_to_90khz;
 use crate::media::MediaFrame;
 use bytes::Bytes;
-use super::nanos_to_90khz;
 
 /// PES stream IDs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,14 +253,13 @@ impl PesPacket {
             | (if self.priority { 0x08 } else { 0 }) // PES_priority
             | 0x00        // data_alignment_indicator
             | 0x00        // copyright
-            | 0x00;       // original_or_copy
+            | 0x00; // original_or_copy
 
         // Flags byte 2
         // PTS_DTS_flags (2b) + ESCR_flag (1b) + ES_rate_flag (1b) +
         // DSM_trick_mode_flag (1b) + additional_copy_info_flag (1b) + PES_CRC_flag (1b) + PES_extension_flag (1b)
         let pts_dts = self.pts_dts_flags() as u8;
-        let flags2 = (pts_dts << 6)
-            | 0x00; // No other flags
+        let flags2 = (pts_dts << 6) | 0x00; // No other flags
 
         output.push(flags1);
         output.push(flags2);
@@ -331,8 +330,8 @@ impl PesEncoder {
         let pts_90khz = nanos_to_90khz(frame.pts.as_nanos());
         let dts_90khz = nanos_to_90khz(frame.dts.as_nanos());
 
-        let mut packet = PesPacket::new(self.video_stream_id, (*frame.data).clone())
-            .with_priority(true);
+        let mut packet =
+            PesPacket::new(self.video_stream_id, (*frame.data).clone()).with_priority(true);
 
         // Set PTS (and DTS if different from PTS)
         if frame.pts != frame.dts {
@@ -354,8 +353,7 @@ impl PesEncoder {
         let pts_90khz = nanos_to_90khz(frame.pts.as_nanos());
 
         // Audio typically only has PTS (no DTS)
-        PesPacket::new(self.audio_stream_id, (*frame.data).clone())
-            .with_pts(pts_90khz)
+        PesPacket::new(self.audio_stream_id, (*frame.data).clone()).with_pts(pts_90khz)
     }
 
     /// Encode any frame to PES packet
@@ -433,8 +431,8 @@ mod tests {
 
     #[test]
     fn test_pes_packet_with_pts() {
-        let packet = PesPacket::new(PesStreamId::video(0), Bytes::from(vec![0; 100]))
-            .with_pts(90_000);
+        let packet =
+            PesPacket::new(PesStreamId::video(0), Bytes::from(vec![0; 100])).with_pts(90_000);
 
         assert_eq!(packet.pts, Some(90_000));
         assert!(packet.dts.is_none());
@@ -470,8 +468,8 @@ mod tests {
 
     #[test]
     fn test_pes_encode_with_pts() {
-        let packet = PesPacket::new(PesStreamId::video(0), Bytes::from(vec![0; 100]))
-            .with_pts(90_000);
+        let packet =
+            PesPacket::new(PesStreamId::video(0), Bytes::from(vec![0; 100])).with_pts(90_000);
 
         let encoded = packet.encode();
 
@@ -551,8 +549,7 @@ mod tests {
     fn test_pes_unbounded_packet() {
         // Large payload should result in unbounded packet (length = 0)
         let large_payload = Bytes::from(vec![0u8; 70000]);
-        let packet = PesPacket::new(PesStreamId::video(0), large_payload)
-            .with_pts(90_000);
+        let packet = PesPacket::new(PesStreamId::video(0), large_payload).with_pts(90_000);
 
         let encoded = packet.encode();
 
@@ -594,8 +591,8 @@ mod tests {
             let ts_14_7 = encoded[3] as u64;
             let ts_6_0 = (encoded[4] >> 1) as u64;
 
-            let decoded = (ts_32_30 << 30) | (ts_29_22 << 22) | (ts_21_15 << 15) |
-                          (ts_14_7 << 7) | ts_6_0;
+            let decoded =
+                (ts_32_30 << 30) | (ts_29_22 << 22) | (ts_21_15 << 15) | (ts_14_7 << 7) | ts_6_0;
 
             assert_eq!(decoded, pts & 0x1FFFFFFFF);
         }

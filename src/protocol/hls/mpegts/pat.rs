@@ -29,8 +29,7 @@
 //! ```
 
 use super::{
-    calculate_crc32, TsPacket, TsPacketHeader, ContinuityCounter,
-    PAT_PID, TS_PACKET_SIZE,
+    ContinuityCounter, PAT_PID, TS_PACKET_SIZE, TsPacket, TsPacketHeader, calculate_crc32,
 };
 
 /// Program information entry in PAT
@@ -98,7 +97,11 @@ impl PatGenerator {
     pub fn add_program(&mut self, program_number: u16, pmt_pid: u16) {
         let info = ProgramInfo::new(program_number, pmt_pid);
         // Check if program already exists
-        if let Some(existing) = self.programs.iter_mut().find(|p| p.program_number == program_number) {
+        if let Some(existing) = self
+            .programs
+            .iter_mut()
+            .find(|p| p.program_number == program_number)
+        {
             *existing = info;
         } else {
             self.programs.push(info);
@@ -242,7 +245,9 @@ impl PatGenerator {
 
         if remaining > 0 {
             // Add stuffing bytes to payload
-            packet.payload.extend(std::iter::repeat(0xFF).take(remaining));
+            packet
+                .payload
+                .extend(std::iter::repeat(0xFF).take(remaining));
         }
 
         packet
@@ -343,8 +348,7 @@ mod tests {
 
     #[test]
     fn test_pat_version() {
-        let mut pat = PatGenerator::new()
-            .with_version(3);
+        let mut pat = PatGenerator::new().with_version(3);
 
         pat.add_program(1, 0x1000);
 
@@ -400,8 +404,7 @@ mod tests {
     #[test]
     fn test_crc32_correctness() {
         // Test CRC32 with known values
-        let mut pat = PatGenerator::new()
-            .with_transport_stream_id(0x0001);
+        let mut pat = PatGenerator::new().with_transport_stream_id(0x0001);
 
         pat.add_program(1, 0x1000);
 

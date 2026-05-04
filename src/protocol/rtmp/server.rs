@@ -2,8 +2,8 @@ use std::{
     collections::HashMap,
     net::{SocketAddr, TcpListener, TcpStream},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread,
     time::Duration,
@@ -257,7 +257,10 @@ impl RtmpServer {
 
     /// Get all active streams
     pub fn get_streams(&self) -> Vec<StreamInfo> {
-        self.streams.iter().map(|entry| entry.value().clone()).collect()
+        self.streams
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
     }
 
     /// Broadcast message to all subscribers of a stream
@@ -494,10 +497,7 @@ impl RtmpServer {
     }
 
     /// Clean up connection from all streams
-    fn cleanup_connection_streams(
-        connection_id: usize,
-        streams: &DashMap<String, StreamInfo>,
-    ) {
+    fn cleanup_connection_streams(connection_id: usize, streams: &DashMap<String, StreamInfo>) {
         let mut to_remove = Vec::new();
 
         for mut entry in streams.iter_mut() {

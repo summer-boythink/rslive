@@ -42,15 +42,14 @@ mod init_segment;
 mod media_segment;
 mod muxer;
 
-pub use boxes::{BoxType, Mp4Box, FourCC, ContainerBox, FreeBox};
 pub use boxes::writer;
+pub use boxes::{BoxType, ContainerBox, FourCC, FreeBox, Mp4Box};
 pub use init_segment::{InitSegmentBuilder, TrackConfig};
 pub use media_segment::{
-    MediaSegmentBuilder, Sample, Sample as MediaSample,
-    TfhdBox, TrunBox, TrafBox, MoofBox, MdatBox,
-    MfhdBox, TfdtBox, TrunSample,
+    MdatBox, MediaSegmentBuilder, MfhdBox, MoofBox, Sample, Sample as MediaSample, TfdtBox,
+    TfhdBox, TrafBox, TrunBox, TrunSample,
 };
-pub use muxer::{Fmp4Muxer, Fmp4MuxerConfig, Fmp4MuxerError, Fmp4MuxerBuilder};
+pub use muxer::{Fmp4Muxer, Fmp4MuxerBuilder, Fmp4MuxerConfig, Fmp4MuxerError};
 
 /// Default timescale (1000 = milliseconds)
 pub const DEFAULT_TIMESCALE: u32 = 1000;

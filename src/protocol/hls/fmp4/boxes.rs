@@ -529,8 +529,7 @@ mod tests {
 
     #[test]
     fn test_container_box_add_child() {
-        let container = ContainerBox::new(BoxType::Moov)
-            .add_child(Box::new(FreeBox::new(100)));
+        let container = ContainerBox::new(BoxType::Moov).add_child(Box::new(FreeBox::new(100)));
         assert_eq!(container.children.len(), 1);
     }
 }

@@ -2,8 +2,8 @@
 //!
 //! Run with: cargo bench
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use bytes::Bytes;
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use std::io::Cursor;
 
 // ============================================================================
@@ -11,7 +11,7 @@ use std::io::Cursor;
 // ============================================================================
 
 fn bench_rtmp_chunk_processing(c: &mut Criterion) {
-    use rslive::rtmp::{RtmpChunkHandler, RtmpMessageHeader, RtmpMessage};
+    use rslive::rtmp::{RtmpChunkHandler, RtmpMessage, RtmpMessageHeader};
 
     let mut group = c.benchmark_group("rtmp_chunk");
 
@@ -23,9 +23,7 @@ fn bench_rtmp_chunk_processing(c: &mut Criterion) {
         let message = RtmpMessage::new(header, payload);
 
         group.bench_function("create_chunks_1kb", |b| {
-            b.iter(|| {
-                black_box(handler.create_chunks(&message, 4, 128))
-            })
+            b.iter(|| black_box(handler.create_chunks(&message, 4, 128)))
         });
     }
 
@@ -58,11 +56,7 @@ fn bench_rtmp_chunk_processing(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("create_chunks_size", chunk_size),
             chunk_size,
-            |b, _| {
-                b.iter(|| {
-                    black_box(handler.create_chunks(&message, 4, *chunk_size))
-                })
-            },
+            |b, _| b.iter(|| black_box(handler.create_chunks(&message, 4, *chunk_size))),
         );
     }
 
@@ -135,9 +129,7 @@ fn bench_amf_encoding(c: &mut Criterion) {
 
     // AMF3 Array encoding
     group.bench_function("amf3_encode_array_100", |b| {
-        let items: Vec<Amf3Value> = (0..100)
-            .map(|i| Amf3Value::Integer(i))
-            .collect();
+        let items: Vec<Amf3Value> = (0..100).map(|i| Amf3Value::Integer(i)).collect();
         let value = Amf3Value::array(items);
 
         b.iter(|| {
@@ -156,8 +148,8 @@ fn bench_amf_encoding(c: &mut Criterion) {
 // ============================================================================
 
 fn bench_amf_decoding(c: &mut Criterion) {
-    use rslive::amf0::{Amf0Encoder, Amf0Decoder, Amf0Value};
-    use rslive::amf3::{Amf3Encoder, Amf3Decoder, Amf3Value};
+    use rslive::amf0::{Amf0Decoder, Amf0Encoder, Amf0Value};
+    use rslive::amf3::{Amf3Decoder, Amf3Encoder, Amf3Value};
     use std::collections::HashMap;
 
     let mut group = c.benchmark_group("amf_decoding");
@@ -246,9 +238,9 @@ fn bench_amf_decoding(c: &mut Criterion) {
 // ============================================================================
 
 fn bench_flv_encoding(c: &mut Criterion) {
-    use rslive::flv::FlvEncoder;
-    use rslive::media::{MediaFrame, Timestamp, VideoFrameType, CodecType};
     use bytes::Bytes;
+    use rslive::flv::FlvEncoder;
+    use rslive::media::{CodecType, MediaFrame, Timestamp, VideoFrameType};
 
     let mut group = c.benchmark_group("flv_encoding");
 
@@ -258,24 +250,20 @@ fn bench_flv_encoding(c: &mut Criterion) {
         Timestamp::from_millis(1000),
         VideoFrameType::Keyframe,
         CodecType::H264,
-        Bytes::from(vec![0x67, 0x42, 0x00, 0x0A, 0x95, 0xA8]),  // Fake H.264 data
+        Bytes::from(vec![0x67, 0x42, 0x00, 0x0A, 0x95, 0xA8]), // Fake H.264 data
     );
 
     group.bench_function("flv_encode_video_frame", |b| {
         let mut encoder = FlvEncoder::video_audio();
         encoder.header(); // Send header once
-        b.iter(|| {
-            black_box(encoder.encode_frame(&video_frame).unwrap())
-        })
+        b.iter(|| black_box(encoder.encode_frame(&video_frame).unwrap()))
     });
 
     // Benchmark with sequence headers
     group.bench_function("flv_encode_with_headers", |b| {
         let mut encoder = FlvEncoder::video_audio();
         encoder.header();
-        b.iter(|| {
-            black_box(encoder.encode_frame_with_headers(&video_frame).unwrap())
-        })
+        b.iter(|| black_box(encoder.encode_frame_with_headers(&video_frame).unwrap()))
     });
 
     group.finish();
@@ -345,8 +333,8 @@ fn bench_buffer_pool(c: &mut Criterion) {
 
 fn bench_concurrent_access(c: &mut Criterion) {
     use dashmap::DashMap;
-    use std::sync::Mutex;
     use std::collections::HashMap;
+    use std::sync::Mutex;
 
     let mut group = c.benchmark_group("concurrent");
 
@@ -356,9 +344,8 @@ fn bench_concurrent_access(c: &mut Criterion) {
         dashmap.insert(i, format!("value_{}", i));
     }
 
-    let mutex_map: Mutex<HashMap<i32, String>> = Mutex::new(
-        (0..1000).map(|i| (i, format!("value_{}", i))).collect()
-    );
+    let mutex_map: Mutex<HashMap<i32, String>> =
+        Mutex::new((0..1000).map(|i| (i, format!("value_{}", i))).collect());
 
     group.bench_function("dashmap_read", |b| {
         b.iter(|| {

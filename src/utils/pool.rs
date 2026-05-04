@@ -4,8 +4,8 @@
 //! to reduce memory allocations and improve cache locality.
 
 use bytes::{Bytes, BytesMut};
-use std::sync::Arc;
 use crossbeam::queue::ArrayQueue;
+use std::sync::Arc;
 
 /// A pooled buffer that returns to the pool when dropped
 pub struct PooledBuffer {
@@ -124,9 +124,11 @@ impl BufferPool {
     /// If the pool is empty, a new buffer is allocated.
     /// The buffer will be returned to the pool when dropped.
     pub fn get(&self) -> PooledBuffer {
-        let buffer = self.inner.buffers.pop().unwrap_or_else(|| {
-            BytesMut::with_capacity(self.inner.default_capacity)
-        });
+        let buffer = self
+            .inner
+            .buffers
+            .pop()
+            .unwrap_or_else(|| BytesMut::with_capacity(self.inner.default_capacity));
 
         PooledBuffer {
             buffer: Some(buffer),

@@ -98,9 +98,15 @@ impl TsPacketHeader {
         buf[0] = TS_SYNC_BYTE;
 
         // Byte 1: TEI + PUSI + TP + PID[12:8]
-        buf[1] = (if self.transport_error_indicator { 0x80 } else { 0 })
-            | (if self.payload_unit_start_indicator { 0x40 } else { 0 })
-            | (if self.transport_priority { 0x20 } else { 0 })
+        buf[1] = (if self.transport_error_indicator {
+            0x80
+        } else {
+            0
+        }) | (if self.payload_unit_start_indicator {
+            0x40
+        } else {
+            0
+        }) | (if self.transport_priority { 0x20 } else { 0 })
             | ((self.pid >> 8) as u8 & 0x1F);
 
         // Byte 2: PID[7:0]
@@ -276,14 +282,31 @@ impl AdaptationField {
         // Only encode flags and data if there is any
         if length > 1 {
             // Flags byte
-            let flags = (if self.discontinuity_indicator { 0x80 } else { 0 })
-                | (if self.random_access_indicator { 0x40 } else { 0 })
-                | (if self.elementary_stream_priority_indicator { 0x20 } else { 0 })
-                | (if self.pcr_flag { 0x10 } else { 0 })
+            let flags = (if self.discontinuity_indicator {
+                0x80
+            } else {
+                0
+            }) | (if self.random_access_indicator {
+                0x40
+            } else {
+                0
+            }) | (if self.elementary_stream_priority_indicator {
+                0x20
+            } else {
+                0
+            }) | (if self.pcr_flag { 0x10 } else { 0 })
                 | (if self.opcr_flag { 0x08 } else { 0 })
                 | (if self.splicing_point_flag { 0x04 } else { 0 })
-                | (if self.transport_private_data_flag { 0x02 } else { 0 })
-                | (if self.adaptation_field_extension_flag { 0x01 } else { 0 });
+                | (if self.transport_private_data_flag {
+                    0x02
+                } else {
+                    0
+                })
+                | (if self.adaptation_field_extension_flag {
+                    0x01
+                } else {
+                    0
+                });
             buf.push(flags);
 
             // PCR (6 bytes)
@@ -380,7 +403,7 @@ impl PcrValue {
     /// ```
     pub fn encode(&self) -> [u8; 6] {
         let base = self.base & 0x1FFFFFFFF; // 33 bits
-        let ext = self.extension & 0x1FF;   // 9 bits
+        let ext = self.extension & 0x1FF; // 9 bits
 
         let mut buf = [0u8; 6];
 
@@ -508,11 +531,15 @@ impl TsPacket {
 
             if stuffing_needed > 0 {
                 // Add stuffing to adaptation field
-                let af = packet.adaptation_field.take().unwrap_or_else(AdaptationField::new);
+                let af = packet
+                    .adaptation_field
+                    .take()
+                    .unwrap_or_else(AdaptationField::new);
                 let mut af = af;
                 af.stuffing_bytes += stuffing_needed;
                 packet.adaptation_field = Some(af);
-                packet.header.adaptation_field_control = if packet.payload.is_empty() { 2 } else { 3 };
+                packet.header.adaptation_field_control =
+                    if packet.payload.is_empty() { 2 } else { 3 };
             }
         }
 
@@ -666,8 +693,7 @@ mod tests {
 
     #[test]
     fn test_ts_packet_basic() {
-        let packet = TsPacket::new(0x100)
-            .with_payload(vec![1, 2, 3, 4, 5]);
+        let packet = TsPacket::new(0x100).with_payload(vec![1, 2, 3, 4, 5]);
 
         let encoded = packet.encode().unwrap();
         assert_eq!(encoded.len(), TS_PACKET_SIZE);
@@ -699,8 +725,7 @@ mod tests {
 
     #[test]
     fn test_ts_packet_with_padding() {
-        let packet = TsPacket::new(0x100)
-            .with_payload(vec![1, 2, 3]); // Small payload
+        let packet = TsPacket::new(0x100).with_payload(vec![1, 2, 3]); // Small payload
 
         let encoded = packet.encode_with_padding();
         assert_eq!(encoded.len(), TS_PACKET_SIZE);

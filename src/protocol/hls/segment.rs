@@ -3,8 +3,8 @@
 //! This module handles the creation and storage of HLS segments.
 //! It supports both MPEG-TS and fMP4 formats.
 
-use super::{HlsError, HlsResult};
 use super::mpegts::{TsMuxer, TsMuxerConfig};
+use super::{HlsError, HlsResult};
 use crate::media::{CodecType, MediaFrame, Timestamp};
 use bytes::Bytes;
 use std::sync::Arc;
@@ -160,13 +160,9 @@ fn encode_ts_segment(frames: &[MediaFrame]) -> HlsResult<Bytes> {
     }
 
     // Detect codecs from frames
-    let video_codec = frames.iter()
-        .find(|f| f.is_video())
-        .map(|f| f.codec);
+    let video_codec = frames.iter().find(|f| f.is_video()).map(|f| f.codec);
 
-    let audio_codec = frames.iter()
-        .find(|f| f.is_audio())
-        .map(|f| f.codec);
+    let audio_codec = frames.iter().find(|f| f.is_audio()).map(|f| f.codec);
 
     // Create muxer config
     let mut config = TsMuxerConfig::default();
@@ -184,7 +180,7 @@ fn encode_fmp4_segment(frames: &[MediaFrame]) -> HlsResult<Bytes> {
         return Err(HlsError::InvalidData("No frames to encode".into()));
     }
 
-    use super::fmp4::{Fmp4Muxer, Fmp4MuxerConfig, Sample, VIDEO_TRACK_ID, AUDIO_TRACK_ID};
+    use super::fmp4::{AUDIO_TRACK_ID, Fmp4Muxer, Fmp4MuxerConfig, Sample, VIDEO_TRACK_ID};
 
     // Detect codecs and track info from frames
     let video_frame = frames.iter().find(|f| f.is_video());

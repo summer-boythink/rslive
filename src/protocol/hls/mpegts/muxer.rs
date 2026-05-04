@@ -17,10 +17,9 @@
 //! ```
 
 use super::{
-    TsPacket, TsPacketHeader, AdaptationField, PcrValue, ContinuityCounter,
-    PatGenerator, PmtGenerator, StreamInfo, StreamType, PesEncoder,
-    TS_PACKET_SIZE, DEFAULT_PMT_PID, DEFAULT_VIDEO_PID, DEFAULT_AUDIO_PID,
-    DEFAULT_PROGRAM_NUMBER, DEFAULT_PCR_INTERVAL_MS,
+    AdaptationField, ContinuityCounter, DEFAULT_AUDIO_PID, DEFAULT_PCR_INTERVAL_MS,
+    DEFAULT_PMT_PID, DEFAULT_PROGRAM_NUMBER, DEFAULT_VIDEO_PID, PatGenerator, PcrValue, PesEncoder,
+    PmtGenerator, StreamInfo, StreamType, TS_PACKET_SIZE, TsPacket, TsPacketHeader,
 };
 use crate::media::{CodecType, MediaFrame};
 use bytes::Bytes;
@@ -111,13 +110,12 @@ impl TsMuxer {
     /// Create a new TsMuxer
     pub fn new(config: TsMuxerConfig) -> Self {
         // Initialize PAT generator
-        let mut pat_generator = PatGenerator::new()
-            .with_transport_stream_id(0x0001);
+        let mut pat_generator = PatGenerator::new().with_transport_stream_id(0x0001);
         pat_generator.add_program(config.program_number, config.pmt_pid);
 
         // Initialize PMT generator
-        let mut pmt_generator = PmtGenerator::new(config.program_number, config.pmt_pid)
-            .with_pcr_pid(config.pcr_pid);
+        let mut pmt_generator =
+            PmtGenerator::new(config.program_number, config.pmt_pid).with_pcr_pid(config.pcr_pid);
 
         // Add streams to PMT
         if let Some(video_codec) = config.video_codec {
@@ -217,13 +215,15 @@ impl TsMuxer {
 
         if let Some(codec) = video_codec {
             if let Some(stream_type) = StreamType::from_codec(codec) {
-                self.pmt_generator.add_stream(StreamInfo::new(stream_type, self.config.video_pid));
+                self.pmt_generator
+                    .add_stream(StreamInfo::new(stream_type, self.config.video_pid));
             }
         }
 
         if let Some(codec) = audio_codec {
             if let Some(stream_type) = StreamType::from_codec(codec) {
-                self.pmt_generator.add_stream(StreamInfo::new(stream_type, self.config.audio_pid));
+                self.pmt_generator
+                    .add_stream(StreamInfo::new(stream_type, self.config.audio_pid));
             }
         }
 
@@ -265,15 +265,21 @@ impl TsMuxer {
     }
 
     /// Convert PES data to TS packets
-    fn pes_to_ts_packets(&mut self, pes_data: &[u8], pid: u16, is_keyframe: bool, pts_nanos: u64) -> Vec<TsPacket> {
+    fn pes_to_ts_packets(
+        &mut self,
+        pes_data: &[u8],
+        pid: u16,
+        is_keyframe: bool,
+        pts_nanos: u64,
+    ) -> Vec<TsPacket> {
         let mut packets = Vec::new();
         let mut remaining = pes_data;
         let mut first_packet = true;
 
         while !remaining.is_empty() {
             // Determine if this packet should have PCR
-            let insert_pcr = first_packet && (pid == self.config.pcr_pid) &&
-                           self.should_insert_pcr(pts_nanos);
+            let insert_pcr =
+                first_packet && (pid == self.config.pcr_pid) && self.should_insert_pcr(pts_nanos);
 
             // Calculate payload capacity
             let header_overhead = if insert_pcr {
@@ -338,10 +344,14 @@ impl TsMuxer {
 
             if padding_needed > 0 {
                 // Add stuffing to adaptation field
-                let mut af = packet.adaptation_field.take().unwrap_or_else(AdaptationField::new);
+                let mut af = packet
+                    .adaptation_field
+                    .take()
+                    .unwrap_or_else(AdaptationField::new);
                 af.stuffing_bytes += padding_needed;
                 packet.adaptation_field = Some(af);
-                packet.header.adaptation_field_control = if packet.payload.is_empty() { 2 } else { 3 };
+                packet.header.adaptation_field_control =
+                    if packet.payload.is_empty() { 2 } else { 3 };
             }
         }
 
@@ -446,9 +456,9 @@ pub enum TsMuxerError {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{DEFAULT_AUDIO_PID, DEFAULT_VIDEO_PID, TS_PACKET_SIZE};
     use super::*;
     use crate::media::{AudioFrameType, Timestamp, VideoFrameType};
-    use super::super::{DEFAULT_VIDEO_PID, DEFAULT_AUDIO_PID, TS_PACKET_SIZE};
 
     fn create_video_frame(pts_ms: u64, is_keyframe: bool, size: usize) -> MediaFrame {
         MediaFrame::video(
@@ -599,7 +609,8 @@ mod tests {
         let segment = muxer.create_segment(&frames);
 
         // Find video packets and check CC increments
-        let video_packets: Vec<_> = segment.chunks(TS_PACKET_SIZE)
+        let video_packets: Vec<_> = segment
+            .chunks(TS_PACKET_SIZE)
             .filter(|chunk| {
                 let pid = ((chunk[1] as u16 & 0x1F) << 8) | (chunk[2] as u16);
                 pid == DEFAULT_VIDEO_PID
@@ -607,7 +618,11 @@ mod tests {
             .collect();
 
         // Should have multiple video packets with 5000 byte frames
-        assert!(video_packets.len() >= 2, "Expected at least 2 video packets, got {}", video_packets.len());
+        assert!(
+            video_packets.len() >= 2,
+            "Expected at least 2 video packets, got {}",
+            video_packets.len()
+        );
 
         // CC should increment (wrapping at 16)
         let cc1 = video_packets[0][3] & 0x0F;
@@ -702,7 +717,8 @@ mod tests {
         assert_eq!(segment.len() % TS_PACKET_SIZE, 0);
 
         // Count video packets
-        let video_count = segment.chunks(TS_PACKET_SIZE)
+        let video_count = segment
+            .chunks(TS_PACKET_SIZE)
             .filter(|chunk| {
                 let pid = ((chunk[1] as u16 & 0x1F) << 8) | (chunk[2] as u16);
                 pid == DEFAULT_VIDEO_PID
@@ -720,15 +736,13 @@ mod tests {
 
         let mut muxer = TsMuxer::new(config);
 
-        let frames = vec![
-            MediaFrame::video(
-                1,
-                Timestamp::from_millis(0),
-                VideoFrameType::Keyframe,
-                CodecType::H265,
-                Bytes::from(vec![0; 1000]),
-            ),
-        ];
+        let frames = vec![MediaFrame::video(
+            1,
+            Timestamp::from_millis(0),
+            VideoFrameType::Keyframe,
+            CodecType::H265,
+            Bytes::from(vec![0; 1000]),
+        )];
 
         let segment = muxer.create_segment(&frames);
         assert!(!segment.is_empty());

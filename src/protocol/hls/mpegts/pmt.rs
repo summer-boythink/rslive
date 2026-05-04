@@ -39,10 +39,7 @@
 //! └──────────────────────────────────────────────────────────────┘
 //! ```
 
-use super::{
-    calculate_crc32, TsPacket, TsPacketHeader, ContinuityCounter,
-    TS_PACKET_SIZE,
-};
+use super::{ContinuityCounter, TS_PACKET_SIZE, TsPacket, TsPacketHeader, calculate_crc32};
 use crate::media::CodecType;
 
 /// Stream types (ISO/IEC 13818-1)
@@ -211,7 +208,8 @@ impl PmtGenerator {
     /// Add a stream
     pub fn add_stream(&mut self, stream: StreamInfo) {
         // Remove existing stream with same PID
-        self.streams.retain(|s| s.elementary_pid != stream.elementary_pid);
+        self.streams
+            .retain(|s| s.elementary_pid != stream.elementary_pid);
         self.streams.push(stream);
     }
 
@@ -389,7 +387,9 @@ impl PmtGenerator {
             // Pad to 188 bytes
             let remaining_space = TS_PACKET_SIZE - 4 - packet.payload.len();
             if remaining_space > 0 {
-                packet.payload.extend(std::iter::repeat(0xFF).take(remaining_space));
+                packet
+                    .payload
+                    .extend(std::iter::repeat(0xFF).take(remaining_space));
             }
 
             packets.push(packet);
@@ -424,16 +424,27 @@ mod tests {
 
     #[test]
     fn test_stream_type_from_codec() {
-        assert_eq!(StreamType::from_codec(CodecType::H264), Some(StreamType::H264));
-        assert_eq!(StreamType::from_codec(CodecType::H265), Some(StreamType::H265));
-        assert_eq!(StreamType::from_codec(CodecType::AAC), Some(StreamType::Aac));
-        assert_eq!(StreamType::from_codec(CodecType::Mp3), Some(StreamType::Mpeg1Audio));
+        assert_eq!(
+            StreamType::from_codec(CodecType::H264),
+            Some(StreamType::H264)
+        );
+        assert_eq!(
+            StreamType::from_codec(CodecType::H265),
+            Some(StreamType::H265)
+        );
+        assert_eq!(
+            StreamType::from_codec(CodecType::AAC),
+            Some(StreamType::Aac)
+        );
+        assert_eq!(
+            StreamType::from_codec(CodecType::Mp3),
+            Some(StreamType::Mpeg1Audio)
+        );
     }
 
     #[test]
     fn test_pmt_section_basic() {
-        let pmt = PmtGenerator::new(1, 0x1000)
-            .with_pcr_pid(0x100);
+        let pmt = PmtGenerator::new(1, 0x1000).with_pcr_pid(0x100);
 
         let section = pmt.generate_section();
 
@@ -455,8 +466,7 @@ mod tests {
 
     #[test]
     fn test_pmt_with_streams() {
-        let mut pmt = PmtGenerator::new(1, 0x1000)
-            .with_pcr_pid(0x100);
+        let mut pmt = PmtGenerator::new(1, 0x1000).with_pcr_pid(0x100);
 
         pmt.add_video_stream(CodecType::H264, 0x100);
         pmt.add_audio_stream(CodecType::AAC, 0x101);
@@ -520,8 +530,7 @@ mod tests {
 
     #[test]
     fn test_pmt_ts_packets() {
-        let mut pmt = PmtGenerator::new(1, 0x1000)
-            .with_pcr_pid(0x100);
+        let mut pmt = PmtGenerator::new(1, 0x1000).with_pcr_pid(0x100);
 
         pmt.add_video_stream(CodecType::H264, 0x100);
         pmt.add_audio_stream(CodecType::AAC, 0x101);
@@ -544,8 +553,7 @@ mod tests {
 
     #[test]
     fn test_pmt_version() {
-        let pmt = PmtGenerator::new(1, 0x1000)
-            .with_version(5);
+        let pmt = PmtGenerator::new(1, 0x1000).with_version(5);
 
         let section = pmt.generate_section();
 
@@ -581,8 +589,8 @@ mod tests {
         let stream = StreamInfo::new(StreamType::H264, 0x100);
         assert_eq!(stream.byte_len(), 5); // No descriptors
 
-        let stream_with_desc = StreamInfo::new(StreamType::H264, 0x100)
-            .with_descriptor(vec![1, 2, 3, 4, 5]);
+        let stream_with_desc =
+            StreamInfo::new(StreamType::H264, 0x100).with_descriptor(vec![1, 2, 3, 4, 5]);
         assert_eq!(stream_with_desc.byte_len(), 10); // 5 + 5 descriptors
     }
 

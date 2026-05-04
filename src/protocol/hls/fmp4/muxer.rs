@@ -210,7 +210,11 @@ impl Fmp4Muxer {
     /// Add a track with custom configuration
     pub fn add_track(&mut self, config: TrackConfig) -> Result<(), Fmp4MuxerError> {
         // Validate track ID is unique
-        if self.tracks.iter().any(|t| t.config.track_id == config.track_id) {
+        if self
+            .tracks
+            .iter()
+            .any(|t| t.config.track_id == config.track_id)
+        {
             return Err(Fmp4MuxerError::InvalidConfig(format!(
                 "Duplicate track ID: {}",
                 config.track_id
@@ -336,10 +340,7 @@ impl Fmp4Muxer {
 
         // Set sequence number
         let seq = self.sequence_number.fetch_add(1, Ordering::SeqCst);
-        self.segment_builder = self
-            .segment_builder
-            .clone()
-            .with_sequence_number(seq);
+        self.segment_builder = self.segment_builder.clone().with_sequence_number(seq);
 
         // Set decode times from track states
         for track in &self.tracks {
@@ -407,10 +408,7 @@ impl Fmp4Muxer {
     /// Create a new segment with the given samples
     ///
     /// Convenience method for creating a single segment from samples.
-    pub fn create_segment(
-        &mut self,
-        samples: Vec<Sample>,
-    ) -> Result<Vec<u8>, Fmp4MuxerError> {
+    pub fn create_segment(&mut self, samples: Vec<Sample>) -> Result<Vec<u8>, Fmp4MuxerError> {
         self.add_samples(samples)?;
         self.flush_media_segment()
     }
@@ -480,13 +478,21 @@ impl Fmp4MuxerBuilder {
 
     /// Add a video track
     pub fn video_track(mut self, track_id: u32, codec: CodecType, width: u16, height: u16) -> Self {
-        self.tracks.push(TrackConfig::video(track_id, codec, width, height));
+        self.tracks
+            .push(TrackConfig::video(track_id, codec, width, height));
         self
     }
 
     /// Add an audio track
-    pub fn audio_track(mut self, track_id: u32, codec: CodecType, sample_rate: u32, channels: u8) -> Self {
-        self.tracks.push(TrackConfig::audio(track_id, codec, sample_rate, channels));
+    pub fn audio_track(
+        mut self,
+        track_id: u32,
+        codec: CodecType,
+        sample_rate: u32,
+        channels: u8,
+    ) -> Self {
+        self.tracks
+            .push(TrackConfig::audio(track_id, codec, sample_rate, channels));
         self
     }
 
@@ -531,7 +537,9 @@ mod tests {
     #[test]
     fn test_muxer_init_segment() {
         let mut muxer = Fmp4Muxer::new(Fmp4MuxerConfig::default());
-        muxer.add_video_track(1, CodecType::H264, 1920, 1080).unwrap();
+        muxer
+            .add_video_track(1, CodecType::H264, 1920, 1080)
+            .unwrap();
 
         let init = muxer.init_segment().unwrap();
 
@@ -599,7 +607,9 @@ mod tests {
 
         // Add samples
         for _ in 0..10 {
-            muxer.add_sample(Sample::video_keyframe(vec![0; 5000], 40)).unwrap();
+            muxer
+                .add_sample(Sample::video_keyframe(vec![0; 5000], 40))
+                .unwrap();
             muxer.add_sample(Sample::audio(vec![0; 100], 20)).unwrap();
         }
 
@@ -625,13 +635,19 @@ mod tests {
         assert!(!muxer.is_segment_ready());
 
         // Add samples to reach target duration (40ms each, need 3 for >100ms)
-        muxer.add_sample(Sample::video_keyframe(vec![0; 1000], 40)).unwrap();
+        muxer
+            .add_sample(Sample::video_keyframe(vec![0; 1000], 40))
+            .unwrap();
         assert!(!muxer.is_segment_ready());
 
-        muxer.add_sample(Sample::video_frame(vec![0; 500], 40)).unwrap();
+        muxer
+            .add_sample(Sample::video_frame(vec![0; 500], 40))
+            .unwrap();
         assert!(!muxer.is_segment_ready());
 
-        muxer.add_sample(Sample::video_frame(vec![0; 500], 40)).unwrap();
+        muxer
+            .add_sample(Sample::video_frame(vec![0; 500], 40))
+            .unwrap();
         // Now 120ms > 100ms target
         assert!(muxer.is_segment_ready());
     }
@@ -645,11 +661,15 @@ mod tests {
 
         assert_eq!(muxer.sequence_number(), 1);
 
-        muxer.add_sample(Sample::video_keyframe(vec![0; 100], 40)).unwrap();
+        muxer
+            .add_sample(Sample::video_keyframe(vec![0; 100], 40))
+            .unwrap();
         muxer.flush_media_segment().unwrap();
         assert_eq!(muxer.sequence_number(), 2);
 
-        muxer.add_sample(Sample::video_frame(vec![0; 100], 40)).unwrap();
+        muxer
+            .add_sample(Sample::video_frame(vec![0; 100], 40))
+            .unwrap();
         muxer.flush_media_segment().unwrap();
         assert_eq!(muxer.sequence_number(), 3);
     }
@@ -661,7 +681,9 @@ mod tests {
             .build()
             .unwrap();
 
-        muxer.add_sample(Sample::video_keyframe(vec![0; 100], 40)).unwrap();
+        muxer
+            .add_sample(Sample::video_keyframe(vec![0; 100], 40))
+            .unwrap();
         muxer.flush_media_segment().unwrap();
 
         assert_eq!(muxer.sequence_number(), 2);
@@ -676,7 +698,9 @@ mod tests {
     fn test_muxer_duplicate_track_id() {
         let mut muxer = Fmp4Muxer::new(Fmp4MuxerConfig::default());
 
-        muxer.add_video_track(1, CodecType::H264, 1920, 1080).unwrap();
+        muxer
+            .add_video_track(1, CodecType::H264, 1920, 1080)
+            .unwrap();
 
         let result = muxer.add_video_track(1, CodecType::H265, 1920, 1080);
         assert!(matches!(result, Err(Fmp4MuxerError::InvalidConfig(_))));
@@ -711,7 +735,9 @@ mod tests {
 
         // Add video samples (40ms each)
         for _ in 0..5 {
-            muxer.add_sample(Sample::video_keyframe(vec![0; 100], 40)).unwrap();
+            muxer
+                .add_sample(Sample::video_keyframe(vec![0; 100], 40))
+                .unwrap();
         }
 
         // Add audio samples (20ms each)
@@ -749,8 +775,12 @@ mod tests {
 
         assert_eq!(muxer.total_sample_count(), 0);
 
-        muxer.add_sample(Sample::video_keyframe(vec![0; 100], 40)).unwrap();
-        muxer.add_sample(Sample::video_frame(vec![0; 100], 40)).unwrap();
+        muxer
+            .add_sample(Sample::video_keyframe(vec![0; 100], 40))
+            .unwrap();
+        muxer
+            .add_sample(Sample::video_frame(vec![0; 100], 40))
+            .unwrap();
         muxer.add_sample(Sample::audio(vec![0; 50], 20)).unwrap();
 
         assert_eq!(muxer.total_sample_count(), 3);

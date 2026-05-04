@@ -6,8 +6,8 @@
 //!
 //! Each segment is independently playable (after the Init Segment).
 
-use super::boxes::{BoxType, Mp4Box, FullBox, writer};
-use super::{VIDEO_TRACK_ID, AUDIO_TRACK_ID};
+use super::boxes::{BoxType, FullBox, Mp4Box, writer};
+use super::{AUDIO_TRACK_ID, VIDEO_TRACK_ID};
 use std::io::{self, Write};
 
 /// A single media sample (frame)
@@ -348,7 +348,10 @@ impl TrunBox {
         let has_duration = self.samples.iter().any(|s| s.duration.is_some());
         let has_size = self.samples.iter().any(|s| s.size.is_some());
         let has_flags = self.samples.iter().any(|s| s.flags.is_some());
-        let has_cto = self.samples.iter().any(|s| s.composition_time_offset.is_some());
+        let has_cto = self
+            .samples
+            .iter()
+            .any(|s| s.composition_time_offset.is_some());
 
         if has_duration {
             flags |= 0x000100; // sample-duration-present
@@ -404,11 +407,7 @@ impl FullBox for TrunBox {
     fn version(&self) -> u8 {
         // Version 1 if composition time offsets are present (for signed values)
         let flags = self.calculate_flags();
-        if (flags & 0x000800) != 0 {
-            1
-        } else {
-            0
-        }
+        if (flags & 0x000800) != 0 { 1 } else { 0 }
     }
 
     fn flags(&self) -> u32 {
@@ -491,8 +490,7 @@ impl TrafBox {
         let mut boxes: Vec<Box<dyn Mp4Box + Send>> = Vec::new();
 
         // tfhd
-        let tfhd = TfhdBox::new(self.track_id)
-            .with_base_data_offset(self.moof_offset);
+        let tfhd = TfhdBox::new(self.track_id).with_base_data_offset(self.moof_offset);
         boxes.push(Box::new(tfhd));
 
         // tfdt
@@ -914,8 +912,7 @@ mod tests {
 
     #[test]
     fn test_media_segment_builder() {
-        let mut builder = MediaSegmentBuilder::new()
-            .with_sequence_number(1);
+        let mut builder = MediaSegmentBuilder::new().with_sequence_number(1);
 
         builder.add_video_sample(Sample::video_keyframe(vec![0; 1000], 40));
         builder.add_video_sample(Sample::video_frame(vec![0; 500], 40));
@@ -981,8 +978,7 @@ mod tests {
 
     #[test]
     fn test_trun_with_first_sample_flags() {
-        let mut trun = TrunBox::new(100)
-            .with_first_sample_flags(0x02000000);
+        let mut trun = TrunBox::new(100).with_first_sample_flags(0x02000000);
 
         trun.add_sample(TrunSample {
             duration: Some(40),
@@ -994,5 +990,4 @@ mod tests {
         let encoded = trun.encode().unwrap();
         assert!(encoded.windows(4).any(|w| w == b"trun"));
     }
-
 }

@@ -6,8 +6,8 @@
 //!
 //! This segment is sent once at the beginning of the stream.
 
-use super::boxes::{BoxType, FourCC, Mp4Box, FullBox, ContainerBox, writer};
 use super::DEFAULT_TIMESCALE;
+use super::boxes::{BoxType, ContainerBox, FourCC, FullBox, Mp4Box, writer};
 use crate::media::CodecType;
 use std::io::{self, Write};
 use std::time::Duration;
@@ -92,12 +92,18 @@ impl TrackConfig {
 
     /// Check if this is a video track
     pub fn is_video(&self) -> bool {
-        matches!(self.codec, CodecType::H264 | CodecType::H265 | CodecType::AV1 | CodecType::VP8 | CodecType::VP9)
+        matches!(
+            self.codec,
+            CodecType::H264 | CodecType::H265 | CodecType::AV1 | CodecType::VP8 | CodecType::VP9
+        )
     }
 
     /// Check if this is an audio track
     pub fn is_audio(&self) -> bool {
-        matches!(self.codec, CodecType::AAC | CodecType::Opus | CodecType::Mp3 | CodecType::G711A | CodecType::G711U)
+        matches!(
+            self.codec,
+            CodecType::AAC | CodecType::Opus | CodecType::Mp3 | CodecType::G711A | CodecType::G711U
+        )
     }
 }
 
@@ -881,13 +887,21 @@ impl Mp4Box for StsdBox {
 pub struct SttsBox;
 
 impl FullBox for SttsBox {
-    fn version(&self) -> u8 { 0 }
-    fn flags(&self) -> u32 { 0 }
+    fn version(&self) -> u8 {
+        0
+    }
+    fn flags(&self) -> u32 {
+        0
+    }
 }
 
 impl Mp4Box for SttsBox {
-    fn box_type(&self) -> BoxType { BoxType::Stts }
-    fn box_size(&self) -> u64 { 16 }
+    fn box_type(&self) -> BoxType {
+        BoxType::Stts
+    }
+    fn box_size(&self) -> u64 {
+        16
+    }
     fn write_box_content(&self, writer: &mut dyn Write) -> io::Result<()> {
         self.write_fullbox_header(writer)?;
         writer::write_u32(writer, 0) // entry_count = 0
@@ -898,13 +912,21 @@ impl Mp4Box for SttsBox {
 pub struct StscBox;
 
 impl FullBox for StscBox {
-    fn version(&self) -> u8 { 0 }
-    fn flags(&self) -> u32 { 0 }
+    fn version(&self) -> u8 {
+        0
+    }
+    fn flags(&self) -> u32 {
+        0
+    }
 }
 
 impl Mp4Box for StscBox {
-    fn box_type(&self) -> BoxType { BoxType::Stsc }
-    fn box_size(&self) -> u64 { 16 }
+    fn box_type(&self) -> BoxType {
+        BoxType::Stsc
+    }
+    fn box_size(&self) -> u64 {
+        16
+    }
     fn write_box_content(&self, writer: &mut dyn Write) -> io::Result<()> {
         self.write_fullbox_header(writer)?;
         writer::write_u32(writer, 0)
@@ -915,13 +937,21 @@ impl Mp4Box for StscBox {
 pub struct StszBox;
 
 impl FullBox for StszBox {
-    fn version(&self) -> u8 { 0 }
-    fn flags(&self) -> u32 { 0 }
+    fn version(&self) -> u8 {
+        0
+    }
+    fn flags(&self) -> u32 {
+        0
+    }
 }
 
 impl Mp4Box for StszBox {
-    fn box_type(&self) -> BoxType { BoxType::Stsz }
-    fn box_size(&self) -> u64 { 20 }
+    fn box_type(&self) -> BoxType {
+        BoxType::Stsz
+    }
+    fn box_size(&self) -> u64 {
+        20
+    }
     fn write_box_content(&self, writer: &mut dyn Write) -> io::Result<()> {
         self.write_fullbox_header(writer)?;
         writer::write_u32(writer, 0)?; // sample_size = 0
@@ -933,13 +963,21 @@ impl Mp4Box for StszBox {
 pub struct StcoBox;
 
 impl FullBox for StcoBox {
-    fn version(&self) -> u8 { 0 }
-    fn flags(&self) -> u32 { 0 }
+    fn version(&self) -> u8 {
+        0
+    }
+    fn flags(&self) -> u32 {
+        0
+    }
 }
 
 impl Mp4Box for StcoBox {
-    fn box_type(&self) -> BoxType { BoxType::Stco }
-    fn box_size(&self) -> u64 { 16 }
+    fn box_type(&self) -> BoxType {
+        BoxType::Stco
+    }
+    fn box_size(&self) -> u64 {
+        16
+    }
     fn write_box_content(&self, writer: &mut dyn Write) -> io::Result<()> {
         self.write_fullbox_header(writer)?;
         writer::write_u32(writer, 0)
@@ -972,13 +1010,21 @@ impl TrexBox {
 }
 
 impl FullBox for TrexBox {
-    fn version(&self) -> u8 { 0 }
-    fn flags(&self) -> u32 { 0 }
+    fn version(&self) -> u8 {
+        0
+    }
+    fn flags(&self) -> u32 {
+        0
+    }
 }
 
 impl Mp4Box for TrexBox {
-    fn box_type(&self) -> BoxType { BoxType::Trex }
-    fn box_size(&self) -> u64 { 32 }
+    fn box_type(&self) -> BoxType {
+        BoxType::Trex
+    }
+    fn box_size(&self) -> u64 {
+        32
+    }
 
     fn write_box_content(&self, writer: &mut dyn Write) -> io::Result<()> {
         self.write_fullbox_header(writer)?;
@@ -1022,13 +1068,27 @@ impl InitSegmentBuilder {
         self
     }
 
-    pub fn add_video_track(mut self, track_id: u32, codec: CodecType, width: u16, height: u16) -> Self {
-        self.tracks.push(TrackConfig::video(track_id, codec, width, height));
+    pub fn add_video_track(
+        mut self,
+        track_id: u32,
+        codec: CodecType,
+        width: u16,
+        height: u16,
+    ) -> Self {
+        self.tracks
+            .push(TrackConfig::video(track_id, codec, width, height));
         self
     }
 
-    pub fn add_audio_track(mut self, track_id: u32, codec: CodecType, sample_rate: u32, channels: u8) -> Self {
-        self.tracks.push(TrackConfig::audio(track_id, codec, sample_rate, channels));
+    pub fn add_audio_track(
+        mut self,
+        track_id: u32,
+        codec: CodecType,
+        sample_rate: u32,
+        channels: u8,
+    ) -> Self {
+        self.tracks
+            .push(TrackConfig::audio(track_id, codec, sample_rate, channels));
         self
     }
 
@@ -1053,7 +1113,12 @@ impl InitSegmentBuilder {
     }
 
     fn build_moov(&self) -> io::Result<ContainerBox> {
-        let next_track_id = self.tracks.iter().map(|t| t.track_id + 1).max().unwrap_or(1);
+        let next_track_id = self
+            .tracks
+            .iter()
+            .map(|t| t.track_id + 1)
+            .max()
+            .unwrap_or(1);
 
         let mut moov = ContainerBox::new(BoxType::Moov);
 
@@ -1158,7 +1223,8 @@ impl InitSegmentBuilder {
                     // Use default SPS/PPS if no data provided
                     let avcc_data = vec![
                         0x01, // configurationVersion
-                        0x64, 0x00, 0x1F, // AVCProfileIndication, profile_compatibility, AVCLevelIndication
+                        0x64, 0x00,
+                        0x1F, // AVCProfileIndication, profile_compatibility, AVCLevelIndication
                         0xFF, // lengthSizeMinusOne = 3 (4-byte lengths)
                         0xE1, // numOfSequenceParameterSets = 1
                         0x00, 0x08, // SPS length
@@ -1177,8 +1243,8 @@ impl InitSegmentBuilder {
                     // Minimal hvcC
                     let hvcc_data = vec![
                         0x01, // configurationVersion
-                        0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        0x00, // general_configuration
+                        0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, // general_configuration
                         0x00, 0x00, 0x00, 0x00, 0x00, // min_spatial/timeline
                         0xB0, // parallelType
                         0x00, // chroma
@@ -1198,7 +1264,10 @@ impl InitSegmentBuilder {
                     stsd = stsd.add_entry(Box::new(Avc1SampleEntry::new(
                         track.width,
                         track.height,
-                        vec![0x01, 0x64, 0x00, 0x1F, 0xFF, 0xE1, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x00, 0x00],
+                        vec![
+                            0x01, 0x64, 0x00, 0x1F, 0xFF, 0xE1, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00,
+                            0x00, 0x00,
+                        ],
                     )));
                 }
             }
@@ -1269,8 +1338,7 @@ mod tests {
 
     #[test]
     fn test_init_segment_minimal() {
-        let builder = InitSegmentBuilder::new()
-            .add_video_track(1, CodecType::H264, 1280, 720);
+        let builder = InitSegmentBuilder::new().add_video_track(1, CodecType::H264, 1280, 720);
 
         let init = builder.build().unwrap();
 
