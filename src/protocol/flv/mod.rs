@@ -416,7 +416,7 @@ pub fn video_frame_to_flv(frame: &MediaFrame) -> FlvResult<Bytes> {
     };
 
     let flv_frame_type = match frame_type {
-        MediaVideoFrameType::Keyframe => VideoFrameType::Keyframe,
+        MediaVideoFrameType::Keyframe | MediaVideoFrameType::SequenceHeader => VideoFrameType::Keyframe,
         MediaVideoFrameType::Interframe => VideoFrameType::Interframe,
         MediaVideoFrameType::DisposableInterframe => VideoFrameType::DisposableInterframe,
         _ => VideoFrameType::Interframe,
@@ -430,8 +430,8 @@ pub fn video_frame_to_flv(frame: &MediaFrame) -> FlvResult<Bytes> {
         }
     };
 
-    // Determine if this is a sequence header
-    let is_sequence_header = frame.data.len() > 0 && (frame.data[0] == 0);
+    // Correctly identify sequence header using enum state
+    let is_sequence_header = frame_type == MediaVideoFrameType::SequenceHeader;
 
     let avc_packet_type = if is_sequence_header {
         AvcPacketType::SequenceHeader

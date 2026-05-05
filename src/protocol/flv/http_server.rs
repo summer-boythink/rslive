@@ -74,15 +74,38 @@ impl HttpFlvServer {
 
     fn create_router(&self) -> axum::Router {
         use axum::routing::get;
+        use tower_http::cors::{Any, CorsLayer};
 
         let state = ServerState {
             router: Arc::clone(&self.router),
             config: self.config.clone(),
         };
 
+        let cors = if let Some(ref origin) = self.config.cors_origin {
+            if origin == "*" {
+                CorsLayer::new()
+                    .allow_origin(Any)
+                    .allow_methods([http::Method::GET, http::Method::OPTIONS])
+                    .allow_headers(Any)
+            } else {
+                CorsLayer::new()
+                    .allow_origin(tower_http::cors::AllowOrigin::exact(
+                        origin.parse().expect("Invalid CORS origin")
+                    ))
+                    .allow_methods([http::Method::GET, http::Method::OPTIONS])
+                    .allow_headers(Any)
+            }
+        } else {
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([http::Method::GET, http::Method::OPTIONS])
+                .allow_headers(Any)
+        };
+
         axum::Router::new()
             .route("/live/:stream", get(handle_live_stream))
             .route("/health", get(health_check))
+            .layer(cors)
             .with_state(state)
     }
 }
@@ -143,19 +166,12 @@ async fn handle_live_stream(
     let stream = ReceiverStream::new(rx);
 
     // Build response with proper headers
-    let mut builder = axum::response::Response::builder()
+    // Note: CORS is now handled by tower-http middleware
+    let builder = axum::response::Response::builder()
         .status(200)
         .header("Content-Type", "video/x-flv")
         .header("Cache-Control", "no-cache")
         .header("Connection", "keep-alive");
-
-    // CORS headers
-    if let Some(origin) = state.config.cors_origin {
-        builder = builder
-            .header("Access-Control-Allow-Origin", origin)
-            .header("Access-Control-Allow-Methods", "GET, OPTIONS")
-            .header("Access-Control-Allow-Headers", "*");
-    }
 
     builder.body(axum::body::Body::from_stream(stream)).unwrap()
 }
@@ -181,11 +197,11 @@ async fn stream_flv(
         })?;
     }
 
-    // Stream frames
+    // Stream frames - StreamRouter already sends sequence headers first for new subscribers
     loop {
         match tokio::time::timeout(config.timeout, subscriber.recv()).await {
             Ok(Ok(frame)) => {
-                match encoder.encode_frame_with_headers(&frame) {
+                match encoder.encode_frame(&frame) {
                     Ok(Some(data)) => {
                         if tx.send(Ok(data)).await.is_err() {
                             break; // Client disconnected

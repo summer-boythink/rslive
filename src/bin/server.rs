@@ -160,6 +160,9 @@ impl ServerRuntime {
         // Start HLS server (async)
         let hls_handle = self.start_hls_server().await?;
 
+        // Start HTTP-FLV server (async)
+        let flv_handle = self.start_flv_server().await?;
+
         // Wait for shutdown signal
         tokio::select! {
             _ = signal::ctrl_c() => {
@@ -171,7 +174,7 @@ impl ServerRuntime {
         }
 
         // Graceful shutdown
-        self.shutdown(hls_handle).await?;
+        self.shutdown(hls_handle, flv_handle).await?;
 
         Ok(())
     }
@@ -239,7 +242,11 @@ impl ServerRuntime {
     }
 
     /// Graceful shutdown
-    async fn shutdown(self, hls_handle: tokio::task::JoinHandle<()>) -> Result<()> {
+    async fn shutdown(
+        self,
+        hls_handle: tokio::task::JoinHandle<()>,
+        flv_handle: tokio::task::JoinHandle<()>,
+    ) -> Result<()> {
         info!("Starting graceful shutdown...");
 
         // Signal RTMP server to stop (if shutdown channel is available)
@@ -250,8 +257,37 @@ impl ServerRuntime {
         // Abort HLS server
         hls_handle.abort();
 
+        // Abort FLV server
+        flv_handle.abort();
+
         info!("Server stopped gracefully");
         Ok(())
+    }
+
+    /// Start HTTP-FLV server
+    async fn start_flv_server(&self) -> Result<tokio::task::JoinHandle<()>> {
+        let bind_addr = self.config.flv_bind;
+        let router = Arc::clone(&self.router);
+
+        let flv_config = rslive::protocol::flv::HttpFlvConfig {
+            bind_addr: bind_addr.to_string(),
+            cors_origin: Some("*".to_string()),
+            ..Default::default()
+        };
+
+        let flv_server = rslive::protocol::flv::HttpFlvServer::new(router, flv_config);
+
+        let handle = tokio::spawn(async move {
+            info!(addr = %bind_addr, "Starting HTTP-FLV server");
+            if let Err(e) = flv_server.run().await {
+                error!(error = %e, "HTTP-FLV server error");
+            }
+        });
+
+        // Wait a moment for server to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        Ok(handle)
     }
 }
 

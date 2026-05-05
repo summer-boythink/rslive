@@ -74,11 +74,12 @@ impl RtmpHandshake {
         // Send S0 + S1
         self.send_s0_s1(stream)?;
 
+        // Send S2 (MUST be sent BEFORE reading C2 to avoid deadlock)
+        // Many clients (FFmpeg, OBS) wait to read complete S0+S1+S2 before sending C2
+        self.send_s2(stream)?;
+
         // Read C2
         self.read_c2(stream)?;
-
-        // Send S2
-        self.send_s2(stream)?;
 
         Ok(())
     }
@@ -310,18 +311,19 @@ impl SimpleHandshake {
         eprintln!("[RTMP Handshake] Sent S0+S1");
         std::io::stderr().flush().ok();
 
+        // Send S2 (MUST be sent BEFORE reading C2 to avoid deadlock)
+        // Many clients (FFmpeg, OBS) wait to read complete S0+S1+S2 before sending C2
+        eprintln!("[RTMP Handshake] Sending S2...");
+        std::io::stderr().flush().ok();
+        handshake.send_s2(stream)?;
+        eprintln!("[RTMP Handshake] Sent S2");
+        std::io::stderr().flush().ok();
+
         // Read C2
         eprintln!("[RTMP Handshake] Waiting for C2...");
         std::io::stderr().flush().ok();
         handshake.read_c2(stream)?;
-        eprintln!("[RTMP Handshake] Received C2");
-        std::io::stderr().flush().ok();
-
-        // Send S2
-        eprintln!("[RTMP Handshake] Sending S2...");
-        std::io::stderr().flush().ok();
-        handshake.send_s2(stream)?;
-        eprintln!("[RTMP Handshake] Sent S2, handshake complete");
+        eprintln!("[RTMP Handshake] Received C2, handshake complete");
         std::io::stderr().flush().ok();
 
         Ok(())

@@ -104,6 +104,10 @@ pub(crate) struct StreamState {
     subscribers: Vec<Sender<MediaFrame>>,
     stats: Arc<StreamStats>,
     keyframe_cache: Arc<RwLock<Vec<MediaFrame>>>,
+    /// Cached video sequence header (SPS/PPS) - always kept for new subscribers
+    video_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
+    /// Cached audio sequence header (AudioSpecificConfig) - always kept for new subscribers
+    audio_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
     _created_at: std::time::Instant,
 }
 
@@ -113,6 +117,8 @@ impl StreamState {
             subscribers: Vec::new(),
             stats: Arc::new(StreamStats::default()),
             keyframe_cache: Arc::new(RwLock::new(Vec::with_capacity(config.keyframe_cache_size))),
+            video_sequence_header: Arc::new(RwLock::new(None)),
+            audio_sequence_header: Arc::new(RwLock::new(None)),
             _created_at: std::time::Instant::now(),
         }
     }
@@ -125,6 +131,8 @@ pub struct StreamPublisher {
     streams: Arc<DashMap<StreamId, StreamState>>,
     stats: Arc<StreamStats>,
     keyframe_cache: Arc<RwLock<Vec<MediaFrame>>>,
+    video_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
+    audio_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
     config: RouterConfig,
 }
 
@@ -134,6 +142,8 @@ impl StreamPublisher {
         streams: Arc<DashMap<StreamId, StreamState>>,
         stats: Arc<StreamStats>,
         keyframe_cache: Arc<RwLock<Vec<MediaFrame>>>,
+        video_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
+        audio_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
         config: RouterConfig,
     ) -> Self {
         Self {
@@ -141,6 +151,8 @@ impl StreamPublisher {
             streams,
             stats,
             keyframe_cache,
+            video_sequence_header,
+            audio_sequence_header,
             config,
         }
     }
@@ -159,8 +171,17 @@ impl StreamPublisher {
         // Update stats
         self.stats.record_frame(&frame);
 
-        // Cache keyframes for new subscribers
-        if self.config.cache_keyframe && frame.is_keyframe() {
+        // Cache sequence headers separately - these are always kept for new subscribers
+        if frame.is_sequence_header() {
+            if frame.is_video() {
+                *self.video_sequence_header.write() = Some(frame.share());
+                trace!(stream_id = %self.stream_id.as_str(), "Cached video sequence header");
+            } else if frame.is_audio() {
+                *self.audio_sequence_header.write() = Some(frame.share());
+                trace!(stream_id = %self.stream_id.as_str(), "Cached audio sequence header");
+            }
+        } else if self.config.cache_keyframe && frame.is_regular_keyframe() {
+            // Cache regular keyframes for new subscribers (not sequence headers)
             let mut cache = self.keyframe_cache.write();
             cache.push(frame.share());
             // Keep only last N keyframes
@@ -226,8 +247,15 @@ impl StreamPublisher {
         // Update stats
         self.stats.record_frame(&frame);
 
-        // Cache keyframes
-        if self.config.cache_keyframe && frame.is_keyframe() {
+        // Cache sequence headers separately
+        if frame.is_sequence_header() {
+            if frame.is_video() {
+                *self.video_sequence_header.write() = Some(frame.share());
+            } else if frame.is_audio() {
+                *self.audio_sequence_header.write() = Some(frame.share());
+            }
+        } else if self.config.cache_keyframe && frame.is_regular_keyframe() {
+            // Cache regular keyframes (not sequence headers)
             let mut cache = self.keyframe_cache.write();
             cache.push(frame.share());
             while cache.len() > self.config.keyframe_cache_size {
@@ -392,6 +420,8 @@ impl StreamRouter {
         let state = StreamState::new(&self.config);
         let stats = Arc::clone(&state.stats);
         let keyframe_cache = Arc::clone(&state.keyframe_cache);
+        let video_sequence_header = Arc::clone(&state.video_sequence_header);
+        let audio_sequence_header = Arc::clone(&state.audio_sequence_header);
 
         // Insert the new stream
         self.streams.insert(stream_id.clone(), state);
@@ -401,6 +431,8 @@ impl StreamRouter {
             Arc::clone(&self.streams),
             stats,
             keyframe_cache,
+            video_sequence_header,
+            audio_sequence_header,
             self.config.clone(),
         );
 
@@ -419,7 +451,7 @@ impl StreamRouter {
     /// Subscribe to a stream
     pub fn subscribe(&self, stream_id: &StreamId) -> MediaResult<StreamSubscriber> {
         // Check if stream exists and get info
-        let (stats, cache_keyframe, keyframe_cache) = {
+        let (stats, cache_keyframe, keyframe_cache, video_seq, audio_seq) = {
             let entry = self
                 .streams
                 .get(stream_id)
@@ -437,12 +469,26 @@ impl StreamRouter {
                 Arc::clone(&entry.stats),
                 self.config.cache_keyframe,
                 Arc::clone(&entry.keyframe_cache),
+                Arc::clone(&entry.video_sequence_header),
+                Arc::clone(&entry.audio_sequence_header),
             )
         };
 
         let (sender, receiver) = flume::bounded(self.config.channel_buffer);
 
-        // Send cached keyframes to new subscriber
+        // Send sequence headers FIRST - decoder needs these before any other frames
+        if let Some(ref seq) = *video_seq.read() {
+            if sender.try_send(seq.share()).is_err() {
+                warn!("Failed to send video sequence header to new subscriber");
+            }
+        }
+        if let Some(ref seq) = *audio_seq.read() {
+            if sender.try_send(seq.share()).is_err() {
+                warn!("Failed to send audio sequence header to new subscriber");
+            }
+        }
+
+        // Then send cached keyframes (these are regular keyframes, not sequence headers)
         if cache_keyframe {
             let cache = keyframe_cache.read();
             for keyframe in cache.iter() {

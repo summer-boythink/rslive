@@ -417,10 +417,16 @@ impl RtmpChunkHandler {
         let chunk_header = self.read_message_header(reader, format, chunk_stream_id)?;
 
         // Determine how many bytes to read for this chunk
-        let state = self.chunk_streams.get(&chunk_stream_id).cloned();
-        let bytes_to_read = if let Some(ref state) = state {
-            if state.has_partial_message() {
-                std::cmp::min(state.remaining_bytes(), self.chunk_size)
+        // Fix: Only Type 3 (RTMP_MESSAGE_HEADER_SIZE_1) can be a continuation
+        // Type 0, 1, 2 always start a new message
+        let bytes_to_read = if format == RTMP_MESSAGE_HEADER_SIZE_1 {
+            let state = self.chunk_streams.get(&chunk_stream_id).cloned();
+            if let Some(ref state) = state {
+                if state.has_partial_message() {
+                    std::cmp::min(state.remaining_bytes(), self.chunk_size)
+                } else {
+                    std::cmp::min(chunk_header.message_length, self.chunk_size)
+                }
             } else {
                 std::cmp::min(chunk_header.message_length, self.chunk_size)
             }
@@ -492,30 +498,43 @@ impl RtmpChunkHandler {
                 ));
             }
             RTMP_MESSAGE_HEADER_SIZE_4 => {
-                // Continue message with new timestamp delta
-                if !state.has_partial_message() {
-                    // This shouldn't happen but handle gracefully
-                    state.expected_length = state
-                        .last_header
-                        .as_ref()
-                        .map(|h| h.payload_length)
-                        .unwrap_or(0);
+                // Type 2: Continue message with new timestamp delta
+                if state.has_partial_message() {
+                    // 如果存在未完成的残片，这里遇到 Type 2 意味着上一个消息被放弃
+                    state.clear();
                 }
+                state.expected_length = state
+                    .last_header
+                    .as_ref()
+                    .map(|h| h.payload_length)
+                    .unwrap_or(0);
+
                 let timestamp_delta = chunk.header.get_timestamp();
                 state.last_timestamp += timestamp_delta;
                 state.last_timestamp_delta = timestamp_delta;
+
+                if let Some(h) = state.last_header.as_mut() {
+                    h.timestamp = state.last_timestamp;
+                    h.message_type = chunk.header.message_type_id;
+                }
             }
             RTMP_MESSAGE_HEADER_SIZE_1 => {
-                // Continue message with same timestamp delta
+                // Type 3: No Header
                 if !state.has_partial_message() {
-                    // This shouldn't happen but handle gracefully
+                    // 这是一个与上一个消息完全相同(除了时间戳递加)的【全新消息】
                     state.expected_length = state
                         .last_header
                         .as_ref()
                         .map(|h| h.payload_length)
                         .unwrap_or(0);
+                    state.last_timestamp += state.last_timestamp_delta;
+
+                    if let Some(h) = state.last_header.as_mut() {
+                        h.timestamp = state.last_timestamp;
+                    }
                 }
-                state.last_timestamp += state.last_timestamp_delta;
+                // 如果 state.has_partial_message() 为 true，
+                // 则这是当前大消息的【续传分块 (Continuation Chunk)】，绝对不能增加时间戳！
             }
             _ => return Err(RtmpError::InvalidChunkFormat(chunk.header.format)),
         }

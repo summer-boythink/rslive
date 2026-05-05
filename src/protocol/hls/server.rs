@@ -90,9 +90,10 @@ impl HlsServer {
         let cors_layer = self.create_cors_layer();
 
         axum::Router::new()
-            .route("/hls/{stream}/master.m3u8", get(handle_master_playlist))
-            .route("/hls/{stream}/index.m3u8", get(handle_media_playlist))
-            .route("/hls/{stream}/segment/{idx}", get(handle_segment))
+            .route("/hls/:stream/master.m3u8", get(handle_master_playlist))
+            .route("/hls/:stream/index.m3u8", get(handle_media_playlist))
+            // 直接匹配文件名，如 segment0.ts 或 segment0.m4s
+            .route("/hls/:stream/:file", get(handle_segment))
             .route("/health", get(health_check))
             .layer(cors_layer)
             .with_state(state)
@@ -209,14 +210,18 @@ async fn handle_media_playlist(
 /// Handle segment request
 async fn handle_segment(
     axum::extract::State(state): axum::extract::State<ServerState>,
-    axum::extract::Path((stream_name, idx)): axum::extract::Path<(String, String)>,
+    axum::extract::Path((stream_name, file)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
     let stream_id = StreamId::new(stream_name.clone());
 
-    // Parse segment index
-    let segment_idx: u64 = match idx.parse() {
-        Ok(n) => n,
-        Err(_) => return not_found("Invalid segment index"),
+    // 从文件名中提取数字索引。例如: "segment123.ts" -> 123, "segment45.m4s" -> 45
+    let segment_idx: u64 = match file
+        .strip_prefix("segment")
+        .and_then(|s| s.strip_suffix(".ts").or_else(|| s.strip_suffix(".m4s")))
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        Some(idx) => idx,
+        None => return not_found(format!("Invalid segment filename: {}", file)),
     };
 
     // Get packager

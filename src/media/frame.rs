@@ -23,13 +23,14 @@ impl FrameType {
     }
 
     pub fn is_keyframe(&self) -> bool {
-        matches!(self, FrameType::Video(VideoFrameType::Keyframe))
+        matches!(self, FrameType::Video(VideoFrameType::Keyframe) | FrameType::Video(VideoFrameType::SequenceHeader))
     }
 }
 
 /// Video frame types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoFrameType {
+    SequenceHeader,
     Keyframe,
     Interframe,
     DisposableInterframe, // H.264 only
@@ -43,6 +44,7 @@ impl VideoFrameType {
         match nal_type {
             5 => Some(Self::Keyframe),   // IDR slice
             1 => Some(Self::Interframe), // Non-IDR slice
+            7 | 8 => Some(Self::SequenceHeader), // SPS/PPS
             _ => None,
         }
     }
@@ -62,7 +64,7 @@ impl VideoFrameType {
     /// Convert to FLV video frame type
     pub fn to_flv_frame_type(&self) -> u8 {
         match self {
-            Self::Keyframe => 1,
+            Self::SequenceHeader | Self::Keyframe => 1, // Sequence header still uses Keyframe flag in FLV
             Self::Interframe => 2,
             Self::DisposableInterframe => 3,
             Self::GeneratedKeyframe => 4,
@@ -198,6 +200,19 @@ impl MediaFrame {
     /// Check if this is a keyframe
     pub fn is_keyframe(&self) -> bool {
         self.frame_type.is_keyframe()
+    }
+
+    /// Check if this is a sequence header (SPS/PPS for video, AudioSpecificConfig for audio)
+    pub fn is_sequence_header(&self) -> bool {
+        matches!(
+            self.frame_type,
+            FrameType::Video(VideoFrameType::SequenceHeader) | FrameType::Audio(AudioFrameType::SequenceHeader)
+        )
+    }
+
+    /// Check if this is a regular keyframe (not a sequence header)
+    pub fn is_regular_keyframe(&self) -> bool {
+        matches!(self.frame_type, FrameType::Video(VideoFrameType::Keyframe))
     }
 
     /// Get frame size in bytes

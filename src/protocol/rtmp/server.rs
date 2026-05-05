@@ -30,7 +30,7 @@ pub struct RtmpServer {
     /// Server listening address
     listen_addr: Option<SocketAddr>,
     /// Active connections (using DashMap for better concurrency)
-    connections: DashMap<usize, Arc<Mutex<RtmpConnection>>>,
+    connections: Arc<DashMap<usize, Arc<Mutex<RtmpConnection>>>>,
     /// Connection counter (using atomic for lock-free increment)
     next_connection_id: AtomicUsize,
     /// Server running state (using atomic for lock-free check)
@@ -38,11 +38,11 @@ pub struct RtmpServer {
     /// Event handlers
     event_handlers: EventHandlers,
     /// Active streams (stream_name -> StreamInfo)
-    streams: DashMap<String, StreamInfo>,
+    streams: Arc<DashMap<String, StreamInfo>>,
     /// Reference to StreamRouter for forwarding media frames
     router: Option<Arc<StreamRouter>>,
     /// Active publishers (stream_name -> StreamPublisher)
-    publishers: DashMap<String, StreamPublisher>,
+    publishers: Arc<DashMap<String, StreamPublisher>>,
 }
 
 /// Stream information on the server
@@ -98,13 +98,13 @@ impl RtmpServer {
         Self {
             config,
             listen_addr: None,
-            connections: DashMap::new(),
+            connections: Arc::new(DashMap::new()),
             next_connection_id: AtomicUsize::new(0),
             is_running: AtomicBool::new(false),
             event_handlers: EventHandlers::default(),
-            streams: DashMap::new(),
+            streams: Arc::new(DashMap::new()),
             router: None,
-            publishers: DashMap::new(),
+            publishers: Arc::new(DashMap::new()),
         }
     }
 
@@ -213,10 +213,10 @@ impl RtmpServer {
                     self.connections.insert(connection_id, connection.clone());
 
                     // Clone references for the spawned thread
-                    let connections = self.connections.clone();
-                    let streams = self.streams.clone();
+                    let connections = Arc::clone(&self.connections);
+                    let streams = Arc::clone(&self.streams);
                     let router = self.router.clone();
-                    let publishers = self.publishers.clone();
+                    let publishers = Arc::clone(&self.publishers);
 
                     thread::spawn(move || {
                         eprintln!("[RTMP] Connection {}: Handler thread started", connection_id);
@@ -326,10 +326,10 @@ impl RtmpServer {
         connection_id: usize,
         mut stream: TcpStream,
         connection: Arc<Mutex<RtmpConnection>>,
-        connections: DashMap<usize, Arc<Mutex<RtmpConnection>>>,
-        streams: DashMap<String, StreamInfo>,
+        connections: Arc<DashMap<usize, Arc<Mutex<RtmpConnection>>>>,
+        streams: Arc<DashMap<String, StreamInfo>>,
         router: Option<Arc<StreamRouter>>,
-        publishers: DashMap<String, StreamPublisher>,
+        publishers: Arc<DashMap<String, StreamPublisher>>,
     ) -> RtmpResult<()> {
         eprintln!("[RTMP] Connection {}: Starting handler", connection_id);
         std::io::Write::flush(&mut std::io::stderr()).ok();
@@ -415,7 +415,7 @@ impl RtmpServer {
         connections.remove(&connection_id);
 
         // Clean up publishers for this connection
-        Self::cleanup_publishers(connection_id, &streams, &publishers);
+        Self::cleanup_publishers(connection_id, &streams, &publishers, &router);
 
         // Remove from any streams
         Self::cleanup_connection_streams(connection_id, &streams);
@@ -430,12 +430,19 @@ impl RtmpServer {
         connection_id: usize,
         streams: &DashMap<String, StreamInfo>,
         publishers: &DashMap<String, StreamPublisher>,
+        router: &Option<Arc<StreamRouter>>,
     ) {
         // Find all streams published by this connection and remove their publishers
         for entry in streams.iter() {
             if entry.publisher_id == connection_id {
                 let stream_name = entry.key().clone();
                 publishers.remove(&stream_name);
+
+                // 确保在中央 Router 中也将这个流注销，避免重推流被占用
+                if let Some(router) = router {
+                    router.unpublish(&StreamId::new(stream_name.as_str()));
+                }
+
                 println!("Removed publisher for stream: {}", stream_name);
             }
         }
@@ -516,14 +523,20 @@ impl RtmpServer {
                     // Create StreamPublisher in router if router is configured
                     if let Some(router) = router {
                         let stream_id = StreamId::new(stream_name.as_str());
-                        match router.publish(stream_id) {
+
+                        // 尝试发布流，如果发现已有残留的僵尸推流端，则踢掉旧的重新发布
+                        let publish_result = router.publish(stream_id.clone()).or_else(|_| {
+                            router.unpublish(&stream_id);
+                            router.publish(stream_id.clone())
+                        });
+
+                        match publish_result {
                             Ok(publisher) => {
                                 publishers.insert(stream_name.clone(), publisher);
                                 println!("Created StreamPublisher for stream: {}", stream_name);
                             }
                             Err(e) => {
                                 eprintln!("Failed to create StreamPublisher for {}: {}", stream_name, e);
-                                // Continue anyway - RTMP will still work even without HLS
                             }
                         }
                     }
@@ -670,12 +683,16 @@ impl RtmpServer {
         };
 
         // Map frame type
-        let frame_type = match header.frame_type {
-            crate::protocol::common::VideoFrameType::Keyframe => VideoFrameType::Keyframe,
-            crate::protocol::common::VideoFrameType::Interframe => VideoFrameType::Interframe,
-            crate::protocol::common::VideoFrameType::DisposableInterframe => VideoFrameType::DisposableInterframe,
-            crate::protocol::common::VideoFrameType::GeneratedKeyframe => VideoFrameType::GeneratedKeyframe,
-            _ => VideoFrameType::Interframe,
+        let frame_type = if header.is_sequence_header() {
+            VideoFrameType::SequenceHeader
+        } else {
+            match header.frame_type {
+                crate::protocol::common::VideoFrameType::Keyframe => VideoFrameType::Keyframe,
+                crate::protocol::common::VideoFrameType::Interframe => VideoFrameType::Interframe,
+                crate::protocol::common::VideoFrameType::DisposableInterframe => VideoFrameType::DisposableInterframe,
+                crate::protocol::common::VideoFrameType::GeneratedKeyframe => VideoFrameType::GeneratedKeyframe,
+                _ => VideoFrameType::Interframe,
+            }
         };
 
         // Calculate timestamps

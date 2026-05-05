@@ -64,7 +64,7 @@ impl FlvEncoder {
     ///
     /// Returns the encoded FLV data ready for streaming.
     /// Sequence headers (AVCDecoderConfigurationRecord, AudioSpecificConfig)
-    /// are cached and sent before keyframes.
+    /// are cached for new subscribers.
     pub fn encode_frame(&mut self, frame: &MediaFrame) -> FlvResult<Option<Bytes>> {
         // Update last timestamp
         let timestamp_ms = frame.pts.as_millis() as u32;
@@ -75,9 +75,9 @@ impl FlvEncoder {
             FrameType::Video(_) => {
                 let data = video_frame_to_flv(frame)?;
 
-                // Cache sequence header
-                if data.len() > 5 && data[1] == 0 {
-                    // AVC sequence header
+                // Cache sequence header ONLY when frame is actual SequenceHeader type
+                // This prevents false positives from regular frames that happen to have similar byte patterns
+                if frame.is_sequence_header() {
                     self.sequence_headers_sent.video = Some(data.clone());
                 }
 
@@ -86,9 +86,8 @@ impl FlvEncoder {
             FrameType::Audio(_) => {
                 let data = audio_frame_to_flv(frame)?;
 
-                // Cache sequence header
-                if data.len() > 2 && data[0] == 0xAF && data[1] == 0 {
-                    // AAC sequence header
+                // Cache sequence header ONLY when frame is actual SequenceHeader type
+                if frame.is_sequence_header() {
                     self.sequence_headers_sent.audio = Some(data.clone());
                 }
 
@@ -108,12 +107,19 @@ impl FlvEncoder {
 
     /// Encode with sequence headers prepended (for new subscribers)
     ///
-    /// This is useful when a new subscriber joins mid-stream.
+    /// This prepends cached sequence headers before regular keyframes.
+    /// SequenceHeader frames are passed through directly without prepending.
     pub fn encode_frame_with_headers(&mut self, frame: &MediaFrame) -> FlvResult<Option<Bytes>> {
         let mut result = BytesMut::new();
 
-        // Check if this is a keyframe and we need to send sequence headers
-        if frame.is_keyframe() {
+        // If frame IS a SequenceHeader, pass it through directly without prepending
+        // This prevents "Found another AVCDecoderConfigurationRecord!" errors
+        if frame.is_sequence_header() {
+            if let Some(tag) = self.encode_frame(frame)? {
+                result.extend_from_slice(&tag);
+            }
+        } else if frame.is_regular_keyframe() {
+            // Regular keyframe: prepend cached sequence headers first
             if let Some(ref video_header) = self.sequence_headers_sent.video {
                 let tag = self.create_tag(TagType::Video, 0, video_header.clone())?;
                 result.extend_from_slice(&tag);
@@ -122,11 +128,15 @@ impl FlvEncoder {
                 let tag = self.create_tag(TagType::Audio, 0, audio_header.clone())?;
                 result.extend_from_slice(&tag);
             }
-        }
-
-        // Encode the actual frame
-        if let Some(tag) = self.encode_frame(frame)? {
-            result.extend_from_slice(&tag);
+            // Then encode the actual frame
+            if let Some(tag) = self.encode_frame(frame)? {
+                result.extend_from_slice(&tag);
+            }
+        } else {
+            // Non-keyframe (interframe, audio raw): just encode normally
+            if let Some(tag) = self.encode_frame(frame)? {
+                result.extend_from_slice(&tag);
+            }
         }
 
         if result.is_empty() {

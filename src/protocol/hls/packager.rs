@@ -164,10 +164,13 @@ impl HlsPackager {
         // Check if target duration is reached
         if duration >= self.config.target_duration {
             // For video segments, try to end on a keyframe
-            if state.last_keyframe_index.is_some() {
-                return true;
+            // Only split if the keyframe is NOT the first frame of the segment
+            if let Some(idx) = state.last_keyframe_index {
+                if idx > 0 {
+                    return true;
+                }
             }
-            // If no keyframe found, allow slightly longer segments
+            // If no keyframe found (or it's at index 0), allow slightly longer segments
             if duration >= self.config.target_duration + Duration::from_secs(2) {
                 return true;
             }
@@ -183,12 +186,22 @@ impl HlsPackager {
         }
 
         // Find a good split point (keyframe)
-        let split_index = state
-            .last_keyframe_index
-            .unwrap_or(state.current_segment.len());
+        let split_index = match state.last_keyframe_index {
+            Some(idx) if idx > 0 => idx,
+            _ => state.current_segment.len(),
+        };
 
         // Take frames up to split point
         let frames: Vec<_> = state.current_segment.drain(..split_index).collect();
+
+        // Update last_keyframe_index because we removed `split_index` elements
+        if let Some(idx) = state.last_keyframe_index {
+            if idx >= split_index {
+                state.last_keyframe_index = Some(idx - split_index);
+            } else {
+                state.last_keyframe_index = None;
+            }
+        }
 
         if frames.is_empty() {
             return Ok(());
@@ -323,7 +336,8 @@ impl HlsPackager {
 pub struct HlsPackagerManager {
     config: PackagerConfig,
     storage: Arc<dyn SegmentStorage>,
-    packagers: dashmap::DashMap<StreamId, Arc<HlsPackager>>,
+    // 用 Arc 包裹，使其能够被跨线程共享引用
+    packagers: Arc<dashmap::DashMap<StreamId, Arc<HlsPackager>>>,
 }
 
 impl HlsPackagerManager {
@@ -331,7 +345,7 @@ impl HlsPackagerManager {
         Self {
             config,
             storage,
-            packagers: dashmap::DashMap::new(),
+            packagers: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -366,7 +380,7 @@ impl HlsPackagerManager {
         &self,
         router: Arc<crate::media::StreamRouter>,
     ) {
-        let packagers = self.packagers.clone();
+        let packagers = Arc::clone(&self.packagers); // 增加引用计数，而不是深拷贝整个 Map
         let config = self.config.clone();
         let storage = self.storage.clone();
 

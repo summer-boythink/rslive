@@ -110,7 +110,15 @@ impl Segment {
 
         let start_time = frames[0].pts;
         let end_time = frames[frames.len() - 1].pts;
-        let duration = end_time.duration_since(start_time);
+        let mut duration = end_time.duration_since(start_time);
+
+        // Add an estimated duration for the last frame to avoid 0ns duration segments
+        if duration.is_zero() {
+            duration = Duration::from_millis(33); // ~30fps single frame
+        } else if frames.len() > 1 {
+            let avg_frame_dur = duration / (frames.len() as u32 - 1);
+            duration += avg_frame_dur;
+        }
 
         let starts_with_keyframe = frames[0].is_keyframe();
 
