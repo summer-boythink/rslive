@@ -143,8 +143,21 @@ impl RtmpHandshake {
 
     /// Read C0 + C1 (client version + handshake data)
     fn read_c0_c1<R: Read>(&mut self, reader: &mut R) -> RtmpResult<()> {
-        // Read C0 (version)
-        let version = reader.read_u8()?;
+        use std::io::ErrorKind;
+
+        // Read C0 (version) with EAGAIN retry
+        let version = loop {
+            match reader.read_u8() {
+                Ok(v) => break v,
+                Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::Interrupted => {
+                    eprintln!("[RTMP Handshake] C0 read got EAGAIN, retrying...");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
+
         if version != RTMP_VERSION {
             return Err(RtmpError::HandshakeFailed(format!(
                 "Unsupported RTMP version: {}",
@@ -152,9 +165,28 @@ impl RtmpHandshake {
             )));
         }
 
-        // Read C1 (1536 bytes)
+        // Read C1 (1536 bytes) with EAGAIN retry
         let mut c1_data = vec![0u8; RTMP_HANDSHAKE_SIZE];
-        reader.read_exact(&mut c1_data)?;
+        let mut total_read = 0usize;
+
+        while total_read < RTMP_HANDSHAKE_SIZE {
+            match reader.read(&mut c1_data[total_read..]) {
+                Ok(0) => {
+                    return Err(RtmpError::HandshakeFailed(
+                        "Connection closed while reading C1".to_string()
+                    ));
+                }
+                Ok(n) => {
+                    total_read += n;
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::Interrupted => {
+                    eprintln!("[RTMP Handshake] C1 read got EAGAIN, retrying...");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
 
         // Store peer data for S2 echo
         self.peer_data = Some(c1_data);
@@ -178,8 +210,29 @@ impl RtmpHandshake {
 
     /// Read C2 (should be echo of S1)
     fn read_c2<R: Read>(&self, reader: &mut R) -> RtmpResult<()> {
+        use std::io::ErrorKind;
+
         let mut c2_data = vec![0u8; RTMP_HANDSHAKE_SIZE];
-        reader.read_exact(&mut c2_data)?;
+        let mut total_read = 0usize;
+
+        while total_read < RTMP_HANDSHAKE_SIZE {
+            match reader.read(&mut c2_data[total_read..]) {
+                Ok(0) => {
+                    return Err(RtmpError::HandshakeFailed(
+                        "Connection closed while reading C2".to_string()
+                    ));
+                }
+                Ok(n) => {
+                    total_read += n;
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::Interrupted => {
+                    eprintln!("[RTMP Handshake] C2 read got EAGAIN, retrying...");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
 
         // Verify C2 is echo of our S1 (optional strict checking)
         Ok(())
@@ -236,19 +289,40 @@ impl SimpleHandshake {
     where
         S: Read + Write,
     {
+        use std::io::Write;
+
+        eprintln!("[RTMP Handshake] Starting server handshake");
+        std::io::stderr().flush().ok();
+
         let mut handshake = RtmpHandshake::new();
 
         // Read C0 + C1
+        eprintln!("[RTMP Handshake] Waiting for C0+C1...");
+        std::io::stderr().flush().ok();
         handshake.read_c0_c1(stream)?;
+        eprintln!("[RTMP Handshake] Received C0+C1");
+        std::io::stderr().flush().ok();
 
         // Send S0 + S1
+        eprintln!("[RTMP Handshake] Sending S0+S1...");
+        std::io::stderr().flush().ok();
         handshake.send_s0_s1(stream)?;
+        eprintln!("[RTMP Handshake] Sent S0+S1");
+        std::io::stderr().flush().ok();
 
         // Read C2
+        eprintln!("[RTMP Handshake] Waiting for C2...");
+        std::io::stderr().flush().ok();
         handshake.read_c2(stream)?;
+        eprintln!("[RTMP Handshake] Received C2");
+        std::io::stderr().flush().ok();
 
         // Send S2
+        eprintln!("[RTMP Handshake] Sending S2...");
+        std::io::stderr().flush().ok();
         handshake.send_s2(stream)?;
+        eprintln!("[RTMP Handshake] Sent S2, handshake complete");
+        std::io::stderr().flush().ok();
 
         Ok(())
     }

@@ -192,7 +192,8 @@ impl RtmpServer {
         self.listen_addr = Some(listener.local_addr()?);
         self.is_running.store(true, Ordering::SeqCst);
 
-        println!("RTMP Server listening on {}", addr);
+        eprintln!("[RTMP] Server listening on {}", addr);
+        std::io::Write::flush(&mut std::io::stderr()).ok();
 
         // Accept connections
         loop {
@@ -202,7 +203,8 @@ impl RtmpServer {
 
             match listener.accept() {
                 Ok((tcp_stream, peer_addr)) => {
-                    println!("New client connected: {}", peer_addr);
+                    eprintln!("[RTMP] New client connected: {}", peer_addr);
+                    std::io::Write::flush(&mut std::io::stderr()).ok();
 
                     let connection_id = self.get_next_connection_id();
                     let connection = Arc::new(Mutex::new(RtmpConnection::new(self.config.clone())));
@@ -217,6 +219,8 @@ impl RtmpServer {
                     let publishers = self.publishers.clone();
 
                     thread::spawn(move || {
+                        eprintln!("[RTMP] Connection {}: Handler thread started", connection_id);
+                        std::io::Write::flush(&mut std::io::stderr()).ok();
                         if let Err(e) = Self::handle_client_connection(
                             connection_id,
                             tcp_stream,
@@ -226,17 +230,20 @@ impl RtmpServer {
                             router,
                             publishers,
                         ) {
-                            eprintln!("Connection {} error: {}", connection_id, e);
+                            eprintln!("[RTMP] Connection {}: Handler error: {}", connection_id, e);
+                            std::io::Write::flush(&mut std::io::stderr()).ok();
                         }
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     // EAGAIN - temporary resource unavailable, retry
+                    eprintln!("[RTMP] accept() would block, retrying...");
                     thread::sleep(Duration::from_millis(10));
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("Failed to accept connection: {}", e);
+                    eprintln!("[RTMP] Failed to accept connection: {}", e);
+                    std::io::Write::flush(&mut std::io::stderr()).ok();
                     thread::sleep(Duration::from_millis(100));
                 }
             }
@@ -324,7 +331,8 @@ impl RtmpServer {
         router: Option<Arc<StreamRouter>>,
         publishers: DashMap<String, StreamPublisher>,
     ) -> RtmpResult<()> {
-        println!("New connection: {}", connection_id);
+        eprintln!("[RTMP] Connection {}: Starting handler", connection_id);
+        std::io::Write::flush(&mut std::io::stderr()).ok();
 
         // Ensure blocking mode for reliable handshake
         stream.set_nonblocking(false)?;
@@ -336,22 +344,36 @@ impl RtmpServer {
         // Disable Nagle's algorithm for lower latency
         stream.set_nodelay(true)?;
 
+        eprintln!("[RTMP] Connection {}: Starting handshake", connection_id);
+        std::io::Write::flush(&mut std::io::stderr()).ok();
+
         // Perform handshake with better error handling
         {
             let mut conn = connection.lock().unwrap();
-            if let Err(e) = conn.server_handshake(&mut stream) {
-                println!("Connection {} handshake failed: {}", connection_id, e);
-                return Err(e);
+            match conn.server_handshake(&mut stream) {
+                Ok(_) => {
+                    eprintln!("[RTMP] Connection {}: Handshake successful", connection_id);
+                    std::io::Write::flush(&mut std::io::stderr()).ok();
+                }
+                Err(e) => {
+                    eprintln!("[RTMP] Connection {}: Handshake failed: {}", connection_id, e);
+                    std::io::Write::flush(&mut std::io::stderr()).ok();
+                    return Err(e);
+                }
             }
         }
 
         // Main message processing loop
+        eprintln!("[RTMP] Connection {}: Entering main loop", connection_id);
+        std::io::Write::flush(&mut std::io::stderr()).ok();
+
         loop {
             let message = match {
                 let mut conn = connection.lock().unwrap();
 
                 // Check for timeout
                 if conn.is_timed_out() {
+                    eprintln!("[RTMP] Connection {}: Connection timed out", connection_id);
                     break;
                 }
 
@@ -364,10 +386,11 @@ impl RtmpServer {
                     || e.kind() == std::io::ErrorKind::UnexpectedEof =>
                 {
                     // Normal connection close or timeout
+                    eprintln!("[RTMP] Connection {}: Connection closed ({:?})", connection_id, e.kind());
                     break;
                 }
                 Err(e) => {
-                    println!("Connection {} read error: {}", connection_id, e);
+                    eprintln!("[RTMP] Connection {} read error: {}", connection_id, e);
                     break;
                 }
             };
@@ -397,7 +420,8 @@ impl RtmpServer {
         // Remove from any streams
         Self::cleanup_connection_streams(connection_id, &streams);
 
-        println!("Connection {} closed", connection_id);
+        eprintln!("[RTMP] Connection {}: Closed", connection_id);
+        std::io::Write::flush(&mut std::io::stderr()).ok();
         Ok(())
     }
 
