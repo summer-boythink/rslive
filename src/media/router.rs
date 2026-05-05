@@ -108,6 +108,8 @@ pub(crate) struct StreamState {
     video_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
     /// Cached audio sequence header (AudioSpecificConfig) - always kept for new subscribers
     audio_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
+    /// Cached metadata (onMetaData) - contains video width/height/fps info
+    metadata: Arc<RwLock<Option<MediaFrame>>>,
     _created_at: std::time::Instant,
 }
 
@@ -119,6 +121,7 @@ impl StreamState {
             keyframe_cache: Arc::new(RwLock::new(Vec::with_capacity(config.keyframe_cache_size))),
             video_sequence_header: Arc::new(RwLock::new(None)),
             audio_sequence_header: Arc::new(RwLock::new(None)),
+            metadata: Arc::new(RwLock::new(None)),
             _created_at: std::time::Instant::now(),
         }
     }
@@ -133,6 +136,7 @@ pub struct StreamPublisher {
     keyframe_cache: Arc<RwLock<Vec<MediaFrame>>>,
     video_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
     audio_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
+    metadata: Arc<RwLock<Option<MediaFrame>>>,
     config: RouterConfig,
 }
 
@@ -144,6 +148,7 @@ impl StreamPublisher {
         keyframe_cache: Arc<RwLock<Vec<MediaFrame>>>,
         video_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
         audio_sequence_header: Arc<RwLock<Option<MediaFrame>>>,
+        metadata: Arc<RwLock<Option<MediaFrame>>>,
         config: RouterConfig,
     ) -> Self {
         Self {
@@ -153,6 +158,7 @@ impl StreamPublisher {
             keyframe_cache,
             video_sequence_header,
             audio_sequence_header,
+            metadata,
             config,
         }
     }
@@ -171,8 +177,13 @@ impl StreamPublisher {
         // Update stats
         self.stats.record_frame(&frame);
 
+        // Cache metadata (onMetaData) - contains video width/height/fps info
+        if matches!(frame.frame_type, FrameType::Data(DataFrameType::Metadata)) {
+            *self.metadata.write() = Some(frame.share());
+            trace!(stream_id = %self.stream_id.as_str(), "Cached metadata");
+        }
         // Cache sequence headers separately - these are always kept for new subscribers
-        if frame.is_sequence_header() {
+        else if frame.is_sequence_header() {
             if frame.is_video() {
                 *self.video_sequence_header.write() = Some(frame.share());
                 trace!(stream_id = %self.stream_id.as_str(), "Cached video sequence header");
@@ -247,8 +258,12 @@ impl StreamPublisher {
         // Update stats
         self.stats.record_frame(&frame);
 
+        // Cache metadata
+        if matches!(frame.frame_type, FrameType::Data(DataFrameType::Metadata)) {
+            *self.metadata.write() = Some(frame.share());
+        }
         // Cache sequence headers separately
-        if frame.is_sequence_header() {
+        else if frame.is_sequence_header() {
             if frame.is_video() {
                 *self.video_sequence_header.write() = Some(frame.share());
             } else if frame.is_audio() {
@@ -422,6 +437,7 @@ impl StreamRouter {
         let keyframe_cache = Arc::clone(&state.keyframe_cache);
         let video_sequence_header = Arc::clone(&state.video_sequence_header);
         let audio_sequence_header = Arc::clone(&state.audio_sequence_header);
+        let metadata = Arc::clone(&state.metadata);
 
         // Insert the new stream
         self.streams.insert(stream_id.clone(), state);
@@ -433,6 +449,7 @@ impl StreamRouter {
             keyframe_cache,
             video_sequence_header,
             audio_sequence_header,
+            metadata,
             self.config.clone(),
         );
 
@@ -451,7 +468,7 @@ impl StreamRouter {
     /// Subscribe to a stream
     pub fn subscribe(&self, stream_id: &StreamId) -> MediaResult<StreamSubscriber> {
         // Check if stream exists and get info
-        let (stats, cache_keyframe, keyframe_cache, video_seq, audio_seq) = {
+        let (stats, cache_keyframe, keyframe_cache, video_seq, audio_seq, metadata) = {
             let entry = self
                 .streams
                 .get(stream_id)
@@ -471,12 +488,20 @@ impl StreamRouter {
                 Arc::clone(&entry.keyframe_cache),
                 Arc::clone(&entry.video_sequence_header),
                 Arc::clone(&entry.audio_sequence_header),
+                Arc::clone(&entry.metadata),
             )
         };
 
         let (sender, receiver) = flume::bounded(self.config.channel_buffer);
 
-        // Send sequence headers FIRST - decoder needs these before any other frames
+        // Send metadata FIRST - flv.js needs onMetaData to initialize properly
+        if let Some(ref meta) = *metadata.read() {
+            if sender.try_send(meta.share()).is_err() {
+                warn!("Failed to send metadata to new subscriber");
+            }
+        }
+
+        // Send sequence headers SECOND - decoder needs these before any other frames
         if let Some(ref seq) = *video_seq.read() {
             if sender.try_send(seq.share()).is_err() {
                 warn!("Failed to send video sequence header to new subscriber");

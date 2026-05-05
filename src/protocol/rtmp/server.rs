@@ -21,7 +21,7 @@ use crate::media::{MediaFrame, StreamId, StreamPublisher, StreamRouter, Timestam
 use crate::protocol::amf0::Amf0Value;
 use crate::protocol::flv::{AudioTagHeader, VideoTagHeader};
 use crate::media::{CodecType, FrameType};
-use crate::media::frame::{AudioFrameType, VideoFrameType};
+use crate::media::frame::{AudioFrameType, DataFrameType, VideoFrameType};
 
 /// RTMP Server for handling incoming client connections
 pub struct RtmpServer {
@@ -470,7 +470,7 @@ impl RtmpServer {
                 Self::handle_video_message_static(connection_id, streams, message, router, publishers)?;
             }
             message_type::AMF0_DATA => {
-                Self::handle_data_message(connection_id, streams, message)?;
+                Self::handle_data_message(connection_id, streams, message, publishers)?;
             }
             _ => {
                 // Handle other control messages
@@ -736,16 +736,34 @@ impl RtmpServer {
     fn handle_data_message(
         connection_id: usize,
         streams: &DashMap<String, StreamInfo>,
-        _message: &RtmpMessage,
+        message: &RtmpMessage,
+        publishers: &DashMap<String, StreamPublisher>,
     ) -> RtmpResult<()> {
-        // Parse metadata if it's onMetaData
-        // This is simplified - real implementation would parse AMF data
-        for entry in streams.iter_mut() {
-            if entry.publisher_id == connection_id {
-                // TODO: Parse and store metadata
-                break;
-            }
+        // Find stream name by publisher ID
+        let stream_name = Self::get_stream_name_by_publisher_static(connection_id, streams);
+        if stream_name.is_none() {
+            return Ok(());
         }
+        let stream_name = stream_name.unwrap();
+
+        // Get publisher for this stream
+        let publisher = match publishers.get(&stream_name) {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        // Create metadata frame - just pass through the raw AMF data
+        let frame = MediaFrame::new(
+            0, // Metadata uses track 0
+            Timestamp::ZERO,
+            FrameType::Data(DataFrameType::Metadata),
+            CodecType::H264, // Placeholder, metadata doesn't have codec
+            bytes::Bytes::copy_from_slice(&message.payload),
+        );
+
+        // Publish metadata frame
+        let _ = publisher.try_publish(frame);
+
         Ok(())
     }
 

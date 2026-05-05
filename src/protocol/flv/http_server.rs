@@ -182,12 +182,9 @@ async fn stream_flv(
     tx: mpsc::Sender<Result<Bytes, std::io::Error>>,
     config: HttpFlvConfig,
 ) -> FlvResult<()> {
-    let has_video = true;
-    let has_audio = true;
+    let mut encoder = FlvEncoder::new(true, true);
 
-    let mut encoder = FlvEncoder::new(has_video, has_audio);
-
-    // Send header
+    // 1. Send FLV Header
     if let Some(header) = encoder.header() {
         tx.send(Ok(header)).await.map_err(|_| {
             FlvError::Io(std::io::Error::new(
@@ -197,19 +194,35 @@ async fn stream_flv(
         })?;
     }
 
-    // Stream frames - StreamRouter already sends sequence headers first for new subscribers
+    // Track if we've sent the first sync point (keyframe with headers)
+    let mut has_sent_sync_point = false;
+
+    // Stream frames - StreamRouter sends metadata and sequence headers first
     loop {
         match tokio::time::timeout(config.timeout, subscriber.recv()).await {
             Ok(Ok(frame)) => {
-                match encoder.encode_frame(&frame) {
-                    Ok(Some(data)) => {
-                        if tx.send(Ok(data)).await.is_err() {
+                // Key logic for instant playback:
+                // If we haven't sent a sync point yet, skip all non-keyframe video frames.
+                // This ensures the browser receives a decodable I-frame first.
+                if !has_sent_sync_point && frame.is_video() && !frame.is_keyframe() {
+                    // Skip P-frames until we get an I-frame (keyframe or sequence header)
+                    continue;
+                }
+
+                // Use encode_frame_with_headers for the first keyframe to ensure
+                // sequence headers are prepended as a safety net
+                let data = if !has_sent_sync_point && frame.is_keyframe() {
+                    encoder.encode_frame_with_headers(&frame)?
+                } else {
+                    encoder.encode_frame(&frame)?
+                };
+
+                if let Some(bytes) = data {
+                    if !bytes.is_empty() {
+                        has_sent_sync_point = true;
+                        if tx.send(Ok(bytes)).await.is_err() {
                             break; // Client disconnected
                         }
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        warn!(error = %e, "Failed to encode frame");
                     }
                 }
             }
